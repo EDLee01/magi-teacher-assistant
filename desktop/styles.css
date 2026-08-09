@@ -812,25 +812,13 @@ textarea:disabled {
   color: var(--muted);
 }
 
-.message-actions {
-  display: flex;
-  margin-top: 8px;
+.message.queued {
+  opacity: 0.72;
 }
 
-.message-follow-up-button {
-  padding: 5px 9px;
-  border: 1px solid transparent;
-  border-radius: 9px;
-  background: transparent;
-  color: #727770;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.message-follow-up-button:hover:not(:disabled) {
-  border-color: #deded8;
-  background: #f0f0ec;
-  color: #2f332e;
+.message.queued .message-meta::after {
+  content: " · 待处理";
+  color: #55769f;
 }
 
 .typing-dots::after {
@@ -898,51 +886,6 @@ textarea:disabled {
 
 .message-attachment-list[hidden] {
   display: none;
-}
-
-.follow-up-target {
-  display: flex;
-  width: 100%;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 10px;
-  border-left: 3px solid #55769f;
-  border-radius: 8px;
-  background: #f2f5f8;
-  color: #4a5562;
-}
-
-.follow-up-target[hidden] {
-  display: none;
-}
-
-.follow-up-target > div {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-
-.follow-up-target strong {
-  color: #293746;
-  font-size: 12px;
-}
-
-.follow-up-target span {
-  overflow: hidden;
-  color: #707984;
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.follow-up-target button {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #7e8790;
-  font-size: 18px;
-  line-height: 1;
 }
 
 .message-attachment-chip,

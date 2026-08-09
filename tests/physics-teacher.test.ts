@@ -423,7 +423,7 @@ describe("Magi 教师助手 backend", () => {
     ).toBe(false);
   });
 
-  it("keeps the targeted answer and prior task when the teacher asks a follow-up", async () => {
+  it("keeps the prior task when the teacher continues naturally in the same Session", async () => {
     let captured: Parameters<typeof runHeadlessPrompt>[0] | undefined;
     const promptRunner: typeof runHeadlessPrompt = async (input) => {
       captured = input;
@@ -446,7 +446,7 @@ describe("Magi 教师助手 backend", () => {
       role: "user",
       content: "从题库中找三道声音的响度和音调原题"
     });
-    const assistantMessageId = sessionStore!.appendMessage({
+    sessionStore!.appendMessage({
       sessionId: session.sessionId,
       role: "assistant",
       content: "已经找到三道广州中考原题，并逐题列出来源。"
@@ -455,8 +455,7 @@ describe("Magi 教师助手 backend", () => {
     await service.sendMessage({
       sessionId: session.sessionId,
       prompt: "第二道太简单了，换成难一点的",
-      resourceQuery: "第二道太简单了，换成难一点的",
-      followUpToMessageId: assistantMessageId
+      resourceQuery: "第二道太简单了，换成难一点的"
     });
 
     const context = sessionStore!
@@ -464,7 +463,7 @@ describe("Magi 教师助手 backend", () => {
       .messages.filter((message) => message.role === "system")
       .at(-1)!.content;
     expect(context).toContain("[本次为追问]");
-    expect(context).toContain(`消息 #${assistantMessageId}`);
+    expect(context).toContain("同一个 Session 中直接继续输入");
     expect(context).toContain("从题库中找三道声音的响度和音调原题");
     expect(context).toContain("已经找到三道广州中考原题");
     expect(context).toContain("physics-question-design");
@@ -513,6 +512,13 @@ describe("Magi 教师助手 backend", () => {
       signal: controller.signal
     });
     await didStart;
+    const immediateMessage = service.recordCancelledTurn({
+      sessionId: session.sessionId,
+      turnStartMessageId: 0,
+      prompt: "请整理一份完整的单元教学方案",
+      jobId: "desktop-cancel-test"
+    });
+    expect(immediateMessage).toBe("已停止本次生成。你可以修改要求后继续追问。");
     controller.abort("教师停止了本次生成");
     const result = await pending;
 
@@ -526,6 +532,7 @@ describe("Magi 教师助手 backend", () => {
       role: "assistant",
       content: "已停止本次生成。你可以修改要求后继续追问。"
     });
+    expect(messages.filter((message) => message.role === "assistant")).toHaveLength(1);
   });
 
   it("batch imports a folder-shaped resource stream and rebuilds the wiki once", async () => {

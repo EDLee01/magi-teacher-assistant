@@ -54,6 +54,8 @@ import {
 
 export type PhysicsTeacherMemoryCategory = "project" | "preference" | "decision" | "session";
 
+export const PHYSICS_TEACHER_CANCELLED_MESSAGE = "已停止本次生成。你可以修改要求后继续追问。";
+
 export interface PhysicsTeacherResourceUploadInput {
   filename: string;
   body: Buffer;
@@ -179,6 +181,7 @@ export class PhysicsTeacherService {
   async sendMessage(input: {
     sessionId: string;
     prompt: string;
+    jobId?: string;
     modelAlias?: string;
     resourceQuery?: string;
     resourceFilters?: Record<string, unknown>;
@@ -203,7 +206,7 @@ export class PhysicsTeacherService {
         : undefined);
     const isQuestionDesign = businessSkill?.name === "physics-question-design";
     const resourceQuery = buildFollowUpResourceQuery(input.resourceQuery, followUp);
-    const jobId = randomUUID();
+    const jobId = input.jobId?.trim() || randomUUID();
     const permissionScope = normalizePermissionScope(input.permissionScope);
     const preparedAttachments = preparePhysicsTeacherMessageAttachments({
       projectPaths,
@@ -273,7 +276,7 @@ export class PhysicsTeacherService {
       });
     } catch (error) {
       if (!isCancelledRequest(error, input.signal)) throw error;
-      const message = "已停止本次生成。你可以修改要求后继续追问。";
+      const message = PHYSICS_TEACHER_CANCELLED_MESSAGE;
       persistCancelledTurn({
         store: this.options.sessionStore,
         sessionId: input.sessionId,
@@ -297,6 +300,28 @@ export class PhysicsTeacherService {
         });
       }
     }
+  }
+
+  recordCancelledTurn(input: {
+    sessionId: string;
+    turnStartMessageId: number;
+    prompt: string;
+    attachmentFilenames?: string[];
+    jobId: string;
+  }): string {
+    this.getSession(input.sessionId);
+    persistCancelledTurn({
+      store: this.options.sessionStore,
+      sessionId: input.sessionId,
+      turnStartMessageId: input.turnStartMessageId,
+      prompt: appendTemporaryAttachmentFilenameManifest(
+        requireText(input.prompt, "prompt"),
+        input.attachmentFilenames ?? []
+      ),
+      message: PHYSICS_TEACHER_CANCELLED_MESSAGE,
+      jobId: requireText(input.jobId, "jobId")
+    });
+    return PHYSICS_TEACHER_CANCELLED_MESSAGE;
   }
 
   listResourceSources(projectId: string) {
@@ -523,7 +548,9 @@ function buildTeacherContext(
     ? [
         "",
         "[本次为追问]",
-        `教师正在针对消息 #${followUp.target.id} 继续追问。`,
+        followUp.explicitlyTargeted
+          ? `教师正在针对消息 #${followUp.target.id} 继续追问。`
+          : "教师在同一个 Session 中直接继续输入，这是上一轮工作的自然延续。",
         "必须结合本 Session 上一轮的要求和回答继续处理，不要把这条消息当作一个无上下文的新任务。",
         followUp.previousUserMessage
           ? `上一轮教师要求：${followUp.previousUserMessage.content.slice(0, 1_000)}`
@@ -559,13 +586,21 @@ function buildTeacherContext(
 interface PhysicsTeacherFollowUp {
   target: MessageRecord;
   previousUserMessage?: MessageRecord;
+  explicitlyTargeted: boolean;
 }
 
 function resolveFollowUp(
   session: SessionRecord,
   followUpToMessageId: number | undefined
 ): PhysicsTeacherFollowUp | undefined {
-  if (followUpToMessageId === undefined) return undefined;
+  if (followUpToMessageId === undefined) {
+    const target = [...session.messages].reverse().find((message) => message.role === "assistant");
+    if (!target) return undefined;
+    const previousUserMessage = [...session.messages]
+      .reverse()
+      .find((message) => message.id < target.id && message.role === "user");
+    return { target, previousUserMessage, explicitlyTargeted: false };
+  }
   if (!Number.isSafeInteger(followUpToMessageId) || followUpToMessageId < 1) {
     throw new Error("追问目标无效");
   }
@@ -574,7 +609,7 @@ function resolveFollowUp(
   const previousUserMessage = [...session.messages]
     .reverse()
     .find((message) => message.id < target.id && message.role === "user");
-  return { target, previousUserMessage };
+  return { target, previousUserMessage, explicitlyTargeted: true };
 }
 
 function buildFollowUpResourceQuery(
@@ -640,12 +675,22 @@ function appendTemporaryAttachmentManifest(
   prompt: string,
   attachments: PreparedPhysicsTeacherMessageAttachment[]
 ): string {
-  if (attachments.length === 0) return prompt;
+  return appendTemporaryAttachmentFilenameManifest(
+    prompt,
+    attachments.map((attachment) => attachment.filename)
+  );
+}
+
+function appendTemporaryAttachmentFilenameManifest(
+  prompt: string,
+  attachmentFilenames: string[]
+): string {
+  if (attachmentFilenames.length === 0) return prompt;
   return [
     prompt,
     "",
     "[本次附件]",
-    ...attachments.map((attachment) => `- ${attachment.filename}`)
+    ...attachmentFilenames.map((filename) => `- ${path.basename(filename.replace(/\\/g, "/"))}`)
   ].join("\n");
 }
 

@@ -17,9 +17,11 @@ const state = {
   permissionScope: "project-write",
   sending: false,
   stopping: false,
+  settlingCancellation: false,
   activeRequestId: null,
   activeSessionId: null,
-  followUpTarget: null,
+  activePendingMessage: null,
+  queuedFollowUps: [],
   loadingSession: false,
   previewFile: null,
   previewObjectUrl: null
@@ -39,9 +41,6 @@ const ui = {
   emptyChat: document.querySelector("#empty-chat"),
   composerForm: document.querySelector("#composer-form"),
   composerInput: document.querySelector("#composer-input"),
-  followUpTarget: document.querySelector("#follow-up-target"),
-  followUpTargetText: document.querySelector("#follow-up-target-text"),
-  clearFollowUpButton: document.querySelector("#clear-follow-up-button"),
   attachMessageButton: document.querySelector("#attach-message-button"),
   messageAttachmentList: document.querySelector("#message-attachment-list"),
   permissionScopeButton: document.querySelector("#permission-scope-button"),
@@ -192,7 +191,7 @@ function renderProjects() {
 }
 
 async function selectProject(projectId) {
-  if (state.sending && state.project?.id !== projectId) {
+  if ((state.sending || state.settlingCancellation) && state.project?.id !== projectId) {
     showToast("当前回答仍在生成，请先停止或等待完成");
     renderProjects();
     return;
@@ -206,7 +205,7 @@ async function selectProject(projectId) {
   state.artifacts = [];
   state.wiki = null;
   state.messageAttachments = [];
-  state.followUpTarget = null;
+  state.queuedFollowUps = [];
   state.memoryFiles = [];
   state.memoryDrafts = [];
   renderProjects();
@@ -214,7 +213,6 @@ async function selectProject(projectId) {
   renderSessions();
   renderResources();
   renderMessageAttachments();
-  renderFollowUpTarget();
   renderChat();
   setProjectControls(true);
 
@@ -302,16 +300,15 @@ function renderSessions() {
 }
 
 async function selectSession(sessionId) {
-  if (state.sending && sessionId !== state.activeSessionId) {
+  if ((state.sending || state.settlingCancellation) && sessionId !== state.activeSessionId) {
     showToast("当前回答仍在生成，请先停止或等待完成");
     return;
   }
   if (state.loadingSession) return;
   state.loadingSession = true;
   state.messageAttachments = [];
-  state.followUpTarget = null;
+  state.queuedFollowUps = [];
   renderMessageAttachments();
-  renderFollowUpTarget();
   try {
     const result = await api("GET", `/api/sessions/${encodeURIComponent(sessionId)}`);
     state.session = result.session;
@@ -326,36 +323,45 @@ async function selectSession(sessionId) {
 }
 
 function renderChat(extraMessage) {
+  const busy = state.sending || state.settlingCancellation;
   const projectSession = state.session?.projectSession;
   ui.sessionTitle.textContent = state.session?.title || "开始一项教研工作";
   ui.sessionKind.textContent = projectSession
     ? kindLabels[projectSession.kind] || "物理教研"
     : "物理教研";
   ui.composerInput.disabled = !state.session;
-  ui.attachMessageButton.disabled = !state.session || state.sending;
-  ui.sendButton.disabled = !state.session;
+  ui.attachMessageButton.disabled = !state.session || state.settlingCancellation;
+  ui.sendButton.disabled = !state.session || state.settlingCancellation;
   ui.sendButton.classList.toggle("stop", state.sending);
   ui.sendButton.textContent = state.sending ? "■" : "↑";
   ui.sendButton.setAttribute("aria-label", state.sending ? "停止生成" : "发送");
   ui.sendButton.title = state.sending ? "停止生成" : "发送";
-  ui.projectSelect.disabled = state.sending;
-  ui.newProjectButton.disabled = state.sending;
-  ui.newSessionButton.disabled = !state.project || state.sending;
+  ui.projectSelect.disabled = busy;
+  ui.newProjectButton.disabled = busy;
+  ui.newSessionButton.disabled = !state.project || busy;
   const messages = (state.session?.messages || []).filter(
     (message) => message.role === "user" || message.role === "assistant"
   );
-  ui.emptyChat.hidden = messages.length > 0 || Boolean(extraMessage);
+  const queued = state.queuedFollowUps.filter((message) => message.sessionId === state.session?.id);
+  const pendingMessage = extraMessage ?? (state.sending ? state.activePendingMessage : null);
+  ui.emptyChat.hidden = messages.length > 0 || Boolean(pendingMessage) || queued.length > 0;
   ui.messageList.replaceChildren();
   for (const message of messages) appendMessage(message);
-  if (extraMessage) appendMessage(extraMessage);
+  if (pendingMessage) appendMessage(pendingMessage);
+  for (const message of queued) {
+    appendMessage({ role: "user", content: message.visiblePrompt, queued: true });
+  }
   requestAnimationFrame(() => {
     ui.messageArea.scrollTop = ui.messageArea.scrollHeight;
   });
 }
 
 function appendMessage(message) {
-  const { role, content, pending = false } = message;
-  const article = element("article", `message ${role}${pending ? " pending" : ""}`);
+  const { role, content, pending = false, queued = false } = message;
+  const article = element(
+    "article",
+    `message ${role}${pending ? " pending" : ""}${queued ? " queued" : ""}`
+  );
   const avatar = element("div", "message-avatar");
   if (role === "user") {
     avatar.textContent = "我";
@@ -391,26 +397,19 @@ function appendMessage(message) {
     }
   }
   container.append(textElement("div", role === "user" ? "教师" : "Magi", "message-meta"), body);
-  if (role === "assistant" && !pending && Number.isSafeInteger(message.id)) {
-    const actions = element("div", "message-actions");
-    const followUp = textElement("button", "↳ 继续追问", "message-follow-up-button");
-    followUp.type = "button";
-    followUp.disabled = state.sending;
-    followUp.addEventListener("click", () => setFollowUpTarget(message));
-    actions.append(followUp);
-    container.append(actions);
-  }
   article.append(container);
   ui.messageList.append(article);
 }
 
-async function sendCurrentMessage(promptOverride) {
-  if (!state.session || state.sending) return;
+async function sendCurrentMessage(promptOverride, queuedMessage) {
+  if (!state.session || state.sending || state.settlingCancellation) return;
   const sessionId = state.session.id;
   const requestId = crypto.randomUUID();
-  const attachments = [...state.messageAttachments];
-  const followUpToMessageId = state.followUpTarget?.id;
-  const typedPrompt = (promptOverride || ui.composerInput.value).trim();
+  const attachments = queuedMessage
+    ? [...queuedMessage.attachments]
+    : [...state.messageAttachments];
+  const permissionScope = queuedMessage?.permissionScope || state.permissionScope;
+  const typedPrompt = (queuedMessage?.prompt || promptOverride || ui.composerInput.value).trim();
   const prompt =
     typedPrompt || (attachments.length ? "请处理这份资料，先说明你读到了什么，再给出分析。" : "");
   if (!prompt) return;
@@ -425,35 +424,33 @@ async function sendCurrentMessage(promptOverride) {
   state.session.messages = optimisticMessages;
   state.sending = true;
   state.stopping = false;
+  state.settlingCancellation = false;
   state.activeRequestId = requestId;
   state.activeSessionId = sessionId;
-  state.messageAttachments = [];
-  state.followUpTarget = null;
-  ui.composerInput.value = "";
-  resizeComposer();
-  renderMessageAttachments();
-  renderFollowUpTarget();
-  renderChat({
+  if (!queuedMessage) state.messageAttachments = [];
+  state.activePendingMessage = {
     role: "assistant",
     content: attachments.length ? "正在读取本次资料并整理" : "正在阅读项目资料并整理",
     pending: true
-  });
+  };
+  if (!queuedMessage) ui.composerInput.value = "";
+  resizeComposer();
+  renderMessageAttachments();
+  renderChat();
   try {
     const response = attachments.length
       ? await desktop.sendMessageWithAttachments({
           sessionId,
           requestId,
           prompt,
-          permissionScope: state.permissionScope,
-          followUpToMessageId,
+          permissionScope,
           files: attachments
         })
       : await desktop.sendMessage({
           sessionId,
           requestId,
           prompt,
-          permissionScope: state.permissionScope,
-          followUpToMessageId
+          permissionScope
         });
     const fresh = await api("GET", `/api/sessions/${encodeURIComponent(sessionId)}`);
     if (state.session?.id === sessionId) {
@@ -481,56 +478,102 @@ async function sendCurrentMessage(promptOverride) {
     if (state.activeRequestId === requestId) {
       state.sending = false;
       state.stopping = false;
+      state.settlingCancellation = false;
+      state.activePendingMessage = null;
       state.activeRequestId = null;
       state.activeSessionId = null;
     }
     renderChat();
     renderMessageAttachments();
     ui.composerInput.focus();
+    const next = state.queuedFollowUps.shift();
+    if (next && state.session?.id === sessionId) void sendCurrentMessage(next.prompt, next);
   }
+}
+
+function queueCurrentFollowUp() {
+  if (!state.session || !state.sending) return;
+  const attachments = [...state.messageAttachments];
+  const typedPrompt = ui.composerInput.value.trim();
+  const prompt =
+    typedPrompt || (attachments.length ? "请处理这份资料，先说明你读到了什么，再给出分析。" : "");
+  if (!prompt) return;
+  state.queuedFollowUps.push({
+    sessionId: state.session.id,
+    prompt,
+    attachments,
+    permissionScope: state.permissionScope,
+    visiblePrompt: appendTemporaryAttachmentManifest(
+      prompt,
+      attachments.map((attachment) => attachment.name)
+    )
+  });
+  state.messageAttachments = [];
+  ui.composerInput.value = "";
+  resizeComposer();
+  renderMessageAttachments();
+  renderChat();
+  showToast("已加入追问，Magi 完成本轮后会接着处理");
 }
 
 async function stopCurrentMessage() {
   if (!state.sending || !state.activeRequestId || !state.activeSessionId || state.stopping) return;
-  state.stopping = true;
-  renderChat({
+  const requestId = state.activeRequestId;
+  const sessionId = state.activeSessionId;
+  const cancelledMessage = {
     role: "assistant",
-    content: "正在停止本次生成",
-    pending: true
-  });
+    content: "已停止本次生成。你可以修改要求后继续追问。",
+    optimisticCancellation: true
+  };
+  state.stopping = true;
+  state.sending = false;
+  state.settlingCancellation = true;
+  state.activePendingMessage = null;
+  if (state.session?.id === sessionId) state.session.messages.push(cancelledMessage);
+  renderChat();
   try {
     const result = await desktop.cancelMessage({
-      requestId: state.activeRequestId,
-      sessionId: state.activeSessionId
+      requestId,
+      sessionId
     });
-    if (!result.cancelled) showToast("这次生成已经结束");
+    if (!result.cancelled) {
+      showToast("这次生成已经结束");
+      const fresh = await api("GET", `/api/sessions/${encodeURIComponent(sessionId)}`);
+      if (state.session?.id === sessionId) {
+        state.session = fresh.session;
+        state.session.projectSession = fresh.projectSession;
+      }
+      if (state.activeRequestId === requestId) {
+        state.stopping = false;
+        state.settlingCancellation = false;
+        state.activeRequestId = null;
+        state.activeSessionId = null;
+      }
+      renderChat();
+    }
   } catch (error) {
-    state.stopping = false;
+    if (state.session?.id === sessionId) {
+      state.session.messages = state.session.messages.filter(
+        (message) => message !== cancelledMessage
+      );
+    }
+    if (state.activeRequestId === requestId) {
+      state.sending = true;
+      state.stopping = false;
+      state.settlingCancellation = false;
+      state.activePendingMessage = {
+        role: "assistant",
+        content: "正在继续生成",
+        pending: true
+      };
+    }
     showToast(error.message, true);
-    renderChat({ role: "assistant", content: "正在继续生成", pending: true });
+    renderChat();
   }
 }
 
-function setFollowUpTarget(message) {
-  if (state.sending || message.role !== "assistant" || !Number.isSafeInteger(message.id)) return;
-  state.followUpTarget = { id: message.id, content: message.content };
-  renderFollowUpTarget();
-  ui.composerInput.focus();
-}
-
-function renderFollowUpTarget() {
-  const target = state.followUpTarget;
-  ui.followUpTarget.hidden = !target;
-  ui.followUpTargetText.textContent = target
-    ? target.content.replace(/\s+/g, " ").trim().slice(0, 120)
-    : "";
-  ui.composerInput.placeholder = target
-    ? "针对这条回答继续追问…"
-    : "和 Magi 讨论这次教学任务…";
-}
-
 async function chooseMessageAttachments() {
-  if (!state.session || state.sending) return;
+  if (!state.session || state.settlingCancellation) return;
   try {
     const files = await desktop.chooseMessageFiles();
     if (!files?.length) return;
@@ -1151,24 +1194,22 @@ document.querySelectorAll("[data-close-dialog]").forEach((button) => {
 ui.composerForm.addEventListener("submit", (event) => {
   event.preventDefault();
   if (state.sending) void stopCurrentMessage();
+  else if (state.settlingCancellation) showToast("停止已经生效，正在完成后台收尾");
   else void sendCurrentMessage();
 });
 ui.composerInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     if (state.sending) {
-      showToast("Magi 正在回答；可以点击停止，或等回答完成后发送追问");
+      queueCurrentFollowUp();
+    } else if (state.settlingCancellation) {
+      showToast("停止已经生效，正在完成后台收尾");
     } else {
       void sendCurrentMessage();
     }
   }
 });
 ui.composerInput.addEventListener("input", resizeComposer);
-ui.clearFollowUpButton.addEventListener("click", () => {
-  state.followUpTarget = null;
-  renderFollowUpTarget();
-  ui.composerInput.focus();
-});
 ui.attachMessageButton.addEventListener("click", () => void chooseMessageAttachments());
 document.querySelectorAll(".starter-card").forEach((button) => {
   button.addEventListener("click", () => {

@@ -1094,6 +1094,49 @@ describe("agent query loop", () => {
     }
   });
 
+  it("does not retry a provider network failure after cancellation", async () => {
+    workspace = mkdtempSync(path.join(os.tmpdir(), "magi-query-"));
+    const controller = new AbortController();
+    let calls = 0;
+    let markFirstFailure!: () => void;
+    const firstFailure = new Promise<void>((resolve) => {
+      markFirstFailure = resolve;
+    });
+    const adapter: ProviderAdapter = {
+      name: "abort-retry-provider",
+      complete: async () => {
+        calls += 1;
+        markFirstFailure();
+        throw new TypeError("fetch failed", { cause: new Error("ECONNRESET") });
+      }
+    };
+    const paths = getMagiPaths({ MAGI_CONFIG_DIR: path.join(workspace, ".magi-next") });
+    ensureMagiHome(paths);
+    const store = SessionStore.open(paths);
+    try {
+      const sessionId = store.createSession({ title: "cancel retry", cwd: workspace });
+      const pending = new QueryEngine({
+        store,
+        sessionId,
+        jobId: "job-cancel-retry",
+        routes: [{ providerName: "abort-retry", model: "explicit", adapter }],
+        cwd: workspace,
+        signal: controller.signal
+      }).submitMessage("stop before retry");
+
+      await firstFailure;
+      const stopStartedAt = Date.now();
+      controller.abort("teacher stop");
+      await expect(pending).rejects.toThrow(/teacher stop/);
+
+      expect(Date.now() - stopStartedAt).toBeLessThan(500);
+      expect(calls).toBe(1);
+      expect(store.getJob("job-cancel-retry")?.status).toBe("cancelled");
+    } finally {
+      store.close();
+    }
+  });
+
   it("executes WebFetch with approval and summarizes fetched content through the active model", async () => {
     workspace = mkdtempSync(path.join(os.tmpdir(), "magi-query-"));
     server = http.createServer((_request, response) => {

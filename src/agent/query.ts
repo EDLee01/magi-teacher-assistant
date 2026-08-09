@@ -267,6 +267,10 @@ async function* runAgentQueryInner(
           }
           break;
         } catch (error) {
+          if (isAbortError(error) || input.signal?.aborted) {
+            throwIfCancelled(input.signal);
+            throw error;
+          }
           const providerError = providerErrorFromException(activeRoute.providerName, error);
           const retryable = providerError instanceof ProviderError && providerError.retryable;
           attempts.push({
@@ -297,7 +301,7 @@ async function* runAgentQueryInner(
               maxAttempts: retryPolicy.fastRetries,
               delayMs
             });
-            await new Promise((resolve) => setTimeout(resolve, delayMs));
+            await waitForRetryDelay(delayMs, input.signal);
             continue;
           }
 
@@ -318,7 +322,7 @@ async function* runAgentQueryInner(
               delayMs,
               messageSuffix: "proxy still down"
             });
-            await new Promise((resolve) => setTimeout(resolve, delayMs));
+            await waitForRetryDelay(delayMs, input.signal);
             continue;
           }
 
@@ -726,6 +730,27 @@ function throwIfCancelled(signal: AbortSignal | undefined): void {
     throw reason;
   }
   throw new DOMException(reason ? String(reason) : "Operation cancelled", "AbortError");
+}
+
+function waitForRetryDelay(delayMs: number, signal: AbortSignal | undefined): Promise<void> {
+  throwIfCancelled(signal);
+  if (!signal) return new Promise((resolve) => setTimeout(resolve, delayMs));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }, delayMs);
+    const abort = () => {
+      clearTimeout(timer);
+      const reason = signal.reason;
+      reject(
+        reason instanceof Error
+          ? reason
+          : new DOMException(reason ? String(reason) : "Operation cancelled", "AbortError")
+      );
+    };
+    signal.addEventListener("abort", abort, { once: true });
+  });
 }
 
 function isAbortError(error: unknown): boolean {

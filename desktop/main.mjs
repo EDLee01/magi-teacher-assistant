@@ -224,13 +224,23 @@ async function sendDesktopMessage(input) {
     throw new Error("当前 Session 已有一项任务正在运行");
   }
   const controller = new AbortController();
-  activeDesktopMessages.set(requestId, { sessionId, controller });
   const files = Array.isArray(input?.files) ? input.files : [];
   const prompt = typeof input?.prompt === "string" ? input.prompt : "";
+  const turnStartMessageId = runtime.service.getSession(sessionId).session.messages.at(-1)?.id ?? 0;
+  activeDesktopMessages.set(requestId, {
+    sessionId,
+    controller,
+    prompt,
+    turnStartMessageId,
+    attachmentFilenames: files.map((file) =>
+      typeof file?.name === "string" ? file.name : "attachment"
+    )
+  });
   try {
     const result = await runtime.service.sendMessage({
       sessionId,
       prompt,
+      jobId: requestId,
       resourceQuery: prompt || undefined,
       permissionScope: normalizePermissionScope(input?.permissionScope),
       followUpToMessageId: normalizeFollowUpMessageId(input?.followUpToMessageId),
@@ -267,7 +277,14 @@ function cancelDesktopMessage(input) {
   const sessionId = typeof input?.sessionId === "string" ? input.sessionId : "";
   if (sessionId && active.sessionId !== sessionId) throw new Error("不能停止其他 Session 的任务");
   active.controller.abort("教师停止了本次生成");
-  return { cancelled: true, status: "cancelling" };
+  const message = runtime.service.recordCancelledTurn({
+    sessionId: active.sessionId,
+    turnStartMessageId: active.turnStartMessageId,
+    prompt: active.prompt,
+    attachmentFilenames: active.attachmentFilenames,
+    jobId: requestId
+  });
+  return { cancelled: true, status: "cancelling", message };
 }
 
 function createWindow() {
