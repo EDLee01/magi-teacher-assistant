@@ -1,0 +1,18 @@
+node_modules/
+dist/
+coverage/
+runner/target/
+.magi-reports/
+*.log
+.DS_Store
+.claude/
+feishu-bridge/config.local.toml
+feishu-bridge/.venv/
+
+# Magi 物理教研助手：真实教材、试卷、学生数据与运行状态不得进入仓库。
+.teacher-data/
+physics-teacher-data/
+private-teaching-data/
+.env
+.env.*
+!.env.example

@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src 'self' data: blob:; object-src 'none'; connect-src 'none'; font-src 'self'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Magi 教师助手</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app" class="app-shell inspector-open">
+      <aside class="workspace-sidebar" aria-label="教学项目与 Session">
+        <div class="window-drag-region"></div>
+        <div class="brand-row">
+          <div class="brand-mark" aria-hidden="true">
+            <img src="./assets/app-icon.png" alt="" />
+          </div>
+          <div>
+            <div class="brand-name">Magi</div>
+            <div class="brand-subtitle">教师助手</div>
+          </div>
+        </div>
+
+        <div class="sidebar-section-label">当前教学项目</div>
+        <div class="project-switch-row">
+          <select id="project-select" aria-label="切换教学项目">
+            <option value="">请选择项目</option>
+          </select>
+          <button
+            id="new-project-button"
+            class="sidebar-icon-button"
+            type="button"
+            title="新建教学项目"
+          >
+            ＋
+          </button>
+        </div>
+        <p id="project-meta" class="sidebar-project-meta">创建项目后开始教研</p>
+
+        <button id="new-session-button" class="primary-sidebar-button" type="button" disabled>
+          <span aria-hidden="true">＋</span>
+          新建教研工作
+        </button>
+
+        <div class="sidebar-section-label">最近工作</div>
+        <nav id="session-list" class="session-list" aria-label="Session 列表"></nav>
+
+        <button id="model-settings-button" class="sidebar-settings-button" type="button">
+          <span>⚙ 模型设置</span>
+          <small id="model-settings-status">检查中</small>
+        </button>
+        <div class="sidebar-footer">
+          <span id="connection-dot" class="connection-dot"></span>
+          <span id="connection-label">正在连接本地服务</span>
+        </div>
+      </aside>
+
+      <main class="chat-column">
+        <header class="chat-header">
+          <div>
+            <div id="session-kind" class="eyebrow">物理教研</div>
+            <h2 id="session-title">开始一项教研工作</h2>
+          </div>
+          <button
+            id="toggle-inspector-button"
+            class="secondary-button project-resource-button"
+            type="button"
+          >
+            <span>项目资料</span>
+            <small id="resource-count-badge">0</small>
+          </button>
+        </header>
+
+        <section id="message-area" class="message-area" aria-live="polite">
+          <div id="empty-chat" class="empty-chat">
+            <div class="empty-symbol" aria-hidden="true">φ</div>
+            <h3>从一次真实的教学任务开始</h3>
+            <p>可以分析集中考试、准备下一节课、调整练习，或者查看学生复测情况。</p>
+            <section id="resource-onboarding" class="project-materials-card" hidden>
+              <div class="project-materials-icon" aria-hidden="true">↥</div>
+              <div class="project-materials-copy">
+                <strong>先把这个项目的基础资料放进来</strong>
+                <p>课标与教材、试卷与答案、成绩与答题明细、教案都可以上传，后续 Session 共用。</p>
+                <div class="resource-type-row" aria-label="支持的基础资料">
+                  <span>课标教材</span><span>试卷答案</span><span>成绩明细</span><span>教案</span>
+                </div>
+              </div>
+              <div class="onboarding-import-actions">
+                <button id="quick-upload-button" class="primary-button" type="button">
+                  选择文件
+                </button>
+                <button id="quick-folder-upload-button" class="secondary-button" type="button">
+                  导入文件夹
+                </button>
+              </div>
+            </section>
+            <div class="starter-grid">
+              <button
+                class="starter-card"
+                data-prompt="帮我分析这次集中考试，先告诉我需要上传哪些数据。"
+                type="button"
+              >
+                <span>考试分析</span>
+                <small>得分率、题目表现、学生分组</small>
+              </button>
+              <button
+                class="starter-card"
+                data-prompt="根据当前项目资料，帮我准备下一节物理课。"
+                type="button"
+              >
+                <span>教师备课</span>
+                <small>教学重点、课堂活动、练习安排</small>
+              </button>
+              <button
+                class="starter-card"
+                data-prompt="根据已有学情，帮我调整下一轮物理作业。"
+                type="button"
+              >
+                <span>练习调整</span>
+                <small>分层练习、错因对应、复测建议</small>
+              </button>
+            </div>
+          </div>
+          <div id="message-list" class="message-list"></div>
+        </section>
+
+        <footer class="composer-wrap">
+          <form id="composer-form" class="composer">
+            <div id="message-attachment-list" class="message-attachment-list" hidden></div>
+            <textarea
+              id="composer-input"
+              rows="2"
+              placeholder="和 Magi 讨论这次教学任务…"
+              aria-label="输入教研问题"
+              disabled
+            ></textarea>
+            <div class="composer-toolbar">
+              <div class="composer-toolbar-left">
+                <button
+                  id="attach-message-button"
+                  type="button"
+                  class="attach-message-button"
+                  disabled
+                  aria-label="添加仅用于本次对话的资料"
+                  title="添加本次对话资料"
+                >
+                  ＋
+                </button>
+                <div class="permission-menu-wrap">
+                  <button
+                    id="permission-scope-button"
+                    class="permission-scope-control"
+                    type="button"
+                    aria-haspopup="menu"
+                    aria-expanded="false"
+                  >
+                    <span class="permission-shield" aria-hidden="true">!</span>
+                    <span id="permission-scope-label">项目内读写</span>
+                    <span class="permission-chevron" aria-hidden="true">⌄</span>
+                  </button>
+                  <div
+                    id="permission-scope-menu"
+                    class="permission-scope-menu"
+                    role="menu"
+                    aria-label="选择 Magi 的操作权限"
+                    hidden
+                  >
+                    <div class="permission-menu-heading">Magi 如何操作这个项目？</div>
+                    <button
+                      class="permission-menu-item"
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked="false"
+                      data-permission-scope="approval"
+                    >
+                      <span class="permission-menu-icon permission-icon-approval" aria-hidden="true"
+                        >?</span
+                      >
+                      <span class="permission-menu-copy">
+                        <strong>操作前询问</strong>
+                        <small>写文件、运行命令和 Git 暂存前逐次询问</small>
+                      </span>
+                      <span class="permission-menu-check" aria-hidden="true">✓</span>
+                    </button>
+                    <button
+                      class="permission-menu-item"
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked="true"
+                      data-permission-scope="project-write"
+                    >
+                      <span class="permission-menu-icon permission-icon-project" aria-hidden="true"
+                        >!</span
+                      >
+                      <span class="permission-menu-copy">
+                        <strong>项目内读写</strong>
+                        <small>可直接写 workspace 和 artifacts；原始资料与长期记忆保持只读</small>
+                      </span>
+                      <span class="permission-menu-check" aria-hidden="true">✓</span>
+                    </button>
+                    <button
+                      class="permission-menu-item"
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked="false"
+                      data-permission-scope="read-only"
+                    >
+                      <span
+                        class="permission-menu-icon permission-icon-read-only"
+                        aria-hidden="true"
+                        >◉</span
+                      >
+                      <span class="permission-menu-copy">
+                        <strong>只读</strong>
+                        <small>只检索和分析，不写文件或运行修改性命令</small>
+                      </span>
+                      <span class="permission-menu-check" aria-hidden="true">✓</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="composer-toolbar-right">
+                <button id="composer-model-button" class="composer-model-button" type="button">
+                  <span aria-hidden="true">◆</span>
+                  <span id="composer-model-label">设置模型</span>
+                </button>
+                <button
+                  id="send-button"
+                  type="submit"
+                  class="send-button"
+                  disabled
+                  aria-label="发送"
+                >
+                  ↑
+                </button>
+              </div>
+            </div>
+          </form>
+        </footer>
+      </main>
+
+      <aside id="inspector" class="inspector open" aria-label="项目资料与记忆">
+        <div class="inspector-header">
+          <div class="inspector-tabs" role="tablist">
+            <button class="inspector-tab active" data-tab="resources" role="tab" type="button">
+              教学资料
+            </button>
+            <button class="inspector-tab" data-tab="memory" role="tab" type="button">
+              项目记忆
+            </button>
+          </div>
+          <button
+            id="close-inspector-button"
+            class="close-button"
+            type="button"
+            aria-label="关闭侧栏"
+          >
+            ×
+          </button>
+        </div>
+
+        <section id="resources-panel" class="inspector-panel active">
+          <div class="resource-panel-heading">
+            <strong>项目基础资料</strong>
+            <p id="resource-summary">还没有上传资料</p>
+          </div>
+          <div class="project-import-actions">
+            <button id="upload-button" class="upload-button" type="button" disabled>
+              <span aria-hidden="true">＋</span>
+              添加文件
+            </button>
+            <button id="folder-upload-button" class="upload-button" type="button" disabled>
+              <span aria-hidden="true">↥</span>
+              导入文件夹
+            </button>
+          </div>
+          <section class="wiki-card" aria-label="项目知识库">
+            <div class="wiki-card-heading">
+              <strong>Magi Wiki</strong>
+              <span>自动整理</span>
+            </div>
+            <p id="wiki-summary">导入资料后自动生成分类目录和来源页</p>
+            <div id="wiki-category-list" class="wiki-category-list"></div>
+          </section>
+          <form id="resource-search-form" class="resource-search">
+            <input
+              id="resource-search-input"
+              type="search"
+              placeholder="在项目资料中查找"
+              disabled
+            />
+          </form>
+          <div id="resource-list" class="resource-list"></div>
+        </section>
+
+        <section id="memory-panel" class="inspector-panel">
+          <div class="memory-note">只有教师确认过的内容，才会进入后续 Session 的长期记忆。</div>
+          <div class="panel-subtitle">待确认</div>
+          <div id="memory-draft-list" class="memory-list"></div>
+          <div class="panel-subtitle">正式记忆</div>
+          <div id="memory-file-list" class="memory-list"></div>
+        </section>
+      </aside>
+    </div>
+
+    <dialog id="artifact-preview-dialog" class="artifact-preview-dialog">
+      <div class="artifact-preview-shell">
+        <header class="artifact-preview-header">
+          <div class="artifact-preview-heading">
+            <div class="eyebrow">交付文件预览</div>
+            <h2 id="artifact-preview-title">文件预览</h2>
+            <p id="artifact-preview-meta"></p>
+          </div>
+          <div class="artifact-preview-actions">
+            <button id="artifact-open-button" class="secondary-button" type="button">
+              用默认应用打开
+            </button>
+            <button
+              id="artifact-preview-close-button"
+              class="close-button"
+              type="button"
+              aria-label="关闭文件预览"
+            >
+              ×
+            </button>
+          </div>
+        </header>
+        <div id="artifact-preview-body" class="artifact-preview-body"></div>
+      </div>
+    </dialog>
+
+    <dialog id="project-dialog" class="app-dialog">
+      <form id="project-form" method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <div class="eyebrow">新建项目</div>
+            <h2>建立一个长期教学空间</h2>
+          </div>
+          <button class="close-button" data-close-dialog type="button">×</button>
+        </div>
+        <label
+          >项目名称<input name="name" required placeholder="例如：高一（3）班力学教研"
+        /></label>
+        <div class="field-row">
+          <label>年级<input name="grade" required placeholder="高一" /></label>
+          <label>班级<input name="className" required placeholder="3班" /></label>
+        </div>
+        <label>教材版本<input name="textbookVersion" placeholder="例如：人教版必修第一册" /></label>
+        <label>任课教师<input name="teacherName" placeholder="选填" /></label>
+        <div class="dialog-actions">
+          <button class="secondary-button" data-close-dialog type="button">取消</button>
+          <button class="primary-button" type="submit">创建项目</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="session-dialog" class="app-dialog compact-dialog">
+      <form id="session-form" method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <div class="eyebrow">新建 Session</div>
+            <h2>这次准备做什么？</h2>
+          </div>
+          <button class="close-button" data-close-dialog type="button">×</button>
+        </div>
+        <label>标题<input name="title" required placeholder="例如：期中考试分析" /></label>
+        <label>
+          类型
+          <select name="kind">
+            <option value="exam-analysis">考试分析</option>
+            <option value="lesson-planning">教师备课</option>
+            <option value="practice-adjustment">练习调整</option>
+            <option value="retest-review">复测回顾</option>
+            <option value="general">其他教研</option>
+          </select>
+        </label>
+        <div class="dialog-actions">
+          <button class="secondary-button" data-close-dialog type="button">取消</button>
+          <button class="primary-button" type="submit">开始</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="model-settings-dialog" class="app-dialog compact-dialog">
+      <form id="model-settings-form" method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <div class="eyebrow">模型设置</div>
+            <h2>连接 OpenAI 兼容接口</h2>
+          </div>
+          <button class="close-button" data-close-dialog type="button">×</button>
+        </div>
+        <p class="dialog-note">
+          支持 OpenAI Chat Completions 协议。API Key
+          会使用系统安全存储加密，不会写入项目或配置文件。
+        </p>
+        <label>
+          接口地址
+          <input name="baseUrl" type="url" required placeholder="https://api.openai.com/v1" />
+        </label>
+        <label>
+          API Key
+          <input name="apiKey" type="password" autocomplete="off" placeholder="sk-…" />
+          <small id="model-key-help" class="field-help">首次配置时必填</small>
+        </label>
+        <label>
+          模型名称
+          <input name="model" required placeholder="填写接口支持的模型名" />
+        </label>
+        <div class="dialog-actions">
+          <button class="secondary-button" data-close-dialog type="button">取消</button>
+          <button class="primary-button" type="submit">保存并使用</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast" role="status"></div>
+    <script type="module" src="./renderer.js"></script>
+  </body>
+</html>
