@@ -135,7 +135,7 @@ export class TeachingResourceGateway {
       all: this.store.listResources(input.projectId),
       query,
       limit
-    }).map((resource) => toSearchItem(resource));
+    }).map((resource) => toSearchItem(resource, query));
     const remoteSources = this.store
       .listResourceSources(input.projectId)
       .filter((source) => source.kind === "remote-api" && source.enabled);
@@ -251,16 +251,49 @@ function parseRemoteItems(
   });
 }
 
-function toSearchItem(resource: TeachingResource): TeachingResourceSearchItem {
+function toSearchItem(resource: TeachingResource, query: string): TeachingResourceSearchItem {
   return {
     id: resource.id,
     title: resource.title,
     kind: resource.kind,
-    snippet: resource.excerpt,
+    snippet: contextualSnippet(resource.excerpt, query),
     source: "教师上传资料",
     sourceId: resource.sourceId,
     metadata: resource.metadata
   };
+}
+
+function contextualSnippet(excerpt: string | undefined, query: string): string | undefined {
+  if (!excerpt) return undefined;
+  const terms = searchTerms(query).filter(
+    (term) => term.length >= 2 && !GENERIC_RESOURCE_QUERY_TERMS.has(term)
+  );
+  if (terms.length === 0) return excerpt.slice(0, 1_500);
+
+  const normalized = excerpt.normalize("NFKC").toLowerCase();
+  const candidates = terms
+    .flatMap((term) => {
+      const positions: number[] = [];
+      let index = normalized.indexOf(term);
+      while (index >= 0 && positions.length < 12) {
+        positions.push(index);
+        index = normalized.indexOf(term, index + term.length);
+      }
+      return positions;
+    })
+    .map((position) => {
+      const start = Math.max(0, position - 500);
+      const end = Math.min(excerpt.length, start + 1_500);
+      const window = normalized.slice(start, end);
+      const score = terms.reduce((sum, term) => sum + (window.includes(term) ? term.length : 0), 0);
+      return { start, end, score };
+    })
+    .sort((left, right) => right.score - left.score || left.start - right.start);
+  const best = candidates[0];
+  if (!best) return excerpt.slice(0, 1_500);
+  return `${best.start > 0 ? "…" : ""}${excerpt.slice(best.start, best.end).trim()}${
+    best.end < excerpt.length ? "…" : ""
+  }`;
 }
 
 function rankLocalResources(input: {
@@ -273,7 +306,9 @@ function rankLocalResources(input: {
   const ranked = input.all
     .filter((resource) => !exactIds.has(resource.id))
     .map((resource) => ({ resource, score: localResourceScore(resource, input.query) }))
-    .filter((item) => item.score > 0)
+    // A single shared Chinese bigram (for example “一定”) is too weak and
+    // creates noisy question-bank matches as the project grows.
+    .filter((item) => item.score >= 2)
     .sort(
       (left, right) =>
         right.score - left.score || right.resource.createdAt.localeCompare(left.resource.createdAt)
@@ -321,6 +356,12 @@ function searchTerms(value: string): string[] {
   }
   return [...terms];
 }
+
+const GENERIC_RESOURCE_QUERY_TERMS = new Set(
+  searchTerms(
+    "请根据参考帮我我们当前这次已有上传资料文件材料题库出题命题组卷生成设计题目试题试卷模拟练习答案解析要求按照部分一个一套"
+  )
+);
 
 function shouldUseRecentResourceFallback(query: string): boolean {
   return /(?:上传|资料|文件|材料|当前项目|已有|刚才|刚刚)|\b(?:upload(?:ed)?|materials?|files?|documents?)\b/i.test(

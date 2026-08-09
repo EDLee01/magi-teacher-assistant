@@ -138,21 +138,12 @@ function registerDesktopBridge(connection) {
     );
   });
 
-  ipcMain.handle("physics-teacher:send-message-with-attachments", async (_event, input) => {
-    const files = Array.isArray(input?.files) ? input.files : [];
-    const result = await runtime.service.sendMessage({
-      sessionId: typeof input?.sessionId === "string" ? input.sessionId : "",
-      prompt: typeof input?.prompt === "string" ? input.prompt : "",
-      resourceQuery: typeof input?.prompt === "string" ? input.prompt : undefined,
-      permissionScope: normalizePermissionScope(input?.permissionScope),
-      attachments: files.map((file) => ({
-        filename: typeof file?.name === "string" ? file.name : "attachment",
-        mimeType: typeof file?.contentType === "string" ? file.contentType : undefined,
-        body: Buffer.from(file?.bytes ?? [])
-      }))
-    });
-    return { result };
-  });
+  ipcMain.handle("physics-teacher:send-message", async (_event, input) =>
+    sendDesktopMessage(input)
+  );
+  ipcMain.handle("physics-teacher:send-message-with-attachments", async (_event, input) =>
+    sendDesktopMessage(input)
+  );
 
   ipcMain.handle("physics-teacher:get-model-settings", () => {
     const settings = readPhysicsTeacherModelSettings(runtime.magiPaths, desktopEnv);
@@ -218,6 +209,24 @@ function registerDesktopBridge(connection) {
     if (error) throw new Error(`无法打开文件：${error}`);
     return true;
   });
+}
+
+async function sendDesktopMessage(input) {
+  if (!runtime) throw new Error("本地 Magi Runtime 尚未启动");
+  const files = Array.isArray(input?.files) ? input.files : [];
+  const prompt = typeof input?.prompt === "string" ? input.prompt : "";
+  const result = await runtime.service.sendMessage({
+    sessionId: typeof input?.sessionId === "string" ? input.sessionId : "",
+    prompt,
+    resourceQuery: prompt || undefined,
+    permissionScope: normalizePermissionScope(input?.permissionScope),
+    attachments: files.map((file) => ({
+      filename: typeof file?.name === "string" ? file.name : "attachment",
+      mimeType: typeof file?.contentType === "string" ? file.contentType : undefined,
+      body: Buffer.from(file?.bytes ?? [])
+    }))
+  });
+  return { result };
 }
 
 function createWindow() {

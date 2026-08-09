@@ -191,15 +191,19 @@ export class PhysicsTeacherService {
       throw new Error("Session 工作目录与项目不一致");
     }
     const projectPaths = this.projectPaths(project.id);
+    const prompt = requireText(input.prompt, "prompt");
+    const businessSkill = resolvePhysicsTeacherSkill(prompt);
+    const isQuestionDesign = businessSkill?.name === "physics-question-design";
     const resourceContext = input.resourceQuery
       ? await this.resources.search({
           projectId: project.id,
-          query: input.resourceQuery,
+          query: isQuestionDesign
+            ? `${input.resourceQuery}\n原题 真题 试卷 题目 练习 答案 解析`
+            : input.resourceQuery,
+          limit: isQuestionDesign ? 50 : undefined,
           filters: input.resourceFilters
         })
       : undefined;
-    const prompt = requireText(input.prompt, "prompt");
-    const businessSkill = resolvePhysicsTeacherSkill(prompt);
     const permissionScope = normalizePermissionScope(input.permissionScope);
     const preparedAttachments = preparePhysicsTeacherMessageAttachments({
       projectPaths,
@@ -472,6 +476,15 @@ function buildTeacherContext(
         physicsTeacherSkillInstructions(businessSkill)
       ]
     : [];
+  const questionBankLines =
+    businessSkill?.name === "physics-question-design"
+      ? [
+          "",
+          "[本次选题要求]",
+          "优先从项目题库逐个知识点检索并直接选用原题。只要存在合适原题，就不能用 AI 自编题替代。",
+          "每道选中题必须核对来源、原题号、题干、选项、答案以及所依赖的原图；题库缺口才允许补充新题并明确标注。"
+        ]
+      : [];
   return [
     "[当前物理教研项目]",
     `项目：${project.name}`,
@@ -485,6 +498,7 @@ function buildTeacherContext(
     "",
     "[项目知识库]",
     "知识库目录：workspace/wiki/INDEX.md。需要跨资料梳理时，先读取目录和分类页，再核对来源页与原文件。",
+    ...questionBankLines,
     "",
     "[当前权限范围]",
     permissionScopeDescription(permissionScope),

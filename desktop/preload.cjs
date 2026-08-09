@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("physicsTeacherDesktop", {
       callback(progress)
     ),
   chooseMessageFiles: () => ipcRenderer.invoke("physics-teacher:choose-message-files"),
+  sendMessage: (input) => ipcRenderer.invoke("physics-teacher:send-message", input),
   sendMessageWithAttachments: (input) =>
     ipcRenderer.invoke("physics-teacher:send-message-with-attachments", input),
   getModelSettings: () => ipcRenderer.invoke("physics-teacher:get-model-settings"),

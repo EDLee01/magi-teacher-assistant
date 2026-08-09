@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { MagiPaths } from "../paths.js";
@@ -75,30 +75,38 @@ description: 当教师要求出题、命题、组卷、生成模拟题、改编�
 
 # 物理命题与组卷
 
-把项目题库当作命题依据，不把旧题简单换数字。先确定范围和蓝图，再出题、作答、校验。
+默认任务不是“让模型自己编题”，而是“从项目题库中选出最适合本次教学目标的原题并组成试卷”。只有题库确实没有合适原题时，才允许补充少量新题，而且必须明确标注。
 
-## 读取资料
+## 原题优先原则
 
-1. 先读 \`workspace/wiki/INDEX.md\`，用 Grep 在分类页中找最近、最相关的真题和年报，再读少量来源页；不要遍历目录，不调用 Bash 或不存在的目录工具。
-2. 读取 Wiki 文件时，FileRead 不要主动设置过小的 \`max_bytes\`。已经由资料检索上下文提供的内容不要重复读取。
-3. 至少核对两份相关来源。当前题库存在时，按 2025、2024、2023 的顺序优先读取本地真题、官方年报和当前教材；更早资料只作补充。只写确实核对过的来源文件名或资料 ID，不虚构“仿某年第某题”。
+1. 先把教师要求拆成知识点、题型、题量、难度和年级范围，再逐个知识点检索题库。
+2. 只要题库中存在范围合适、题干完整、答案可核对的原题，就直接选用原题，不改写题干、选项、数据和设问，不把原题“仿写”为一道 AI 题。
+3. 目标是可用原题占 100%。不能为了凑年份、凑新情境或展示生成能力而主动降低原题比例。
+4. 每道题都要保留来源：来源文件名、年份/地区、原题号和资料 ID。学生卷可以不显示来源，但必须另附“选题来源表”供教师核对。
+5. 原题依赖图片、表格或装置图时，必须确认原图能够随题交付。提取不到原图就换一题，或明确请教师补图；不能删掉“如图”后凭空重画成另一道题。
+6. 只有对应知识点检索不到合适原题时，才可补充新题。补充题必须在选题来源表中标为“题库缺口补充题”，并说明缺少的是哪个知识点、题型或难度。
 
-## 命题步骤
+## 题库检索
+
+1. 先读 \`workspace/wiki/INDEX.md\`，重点查看“试卷与答案”“作业与练习”分类页，再用 Grep 以知识点及同义词检索来源页；不要只看文件标题，也不要只读检索摘要的开头。
+2. 对每个知识点建立原题候选表，至少记录：来源、题号、题型、考点、难度、题干是否完整、答案是否可核对、是否依赖原图。
+3. 至少核对两份相关来源。优先选择与当前年级、教学进度和地区风格一致的题目；年份只用于排序，不能因为题目较早就改写它。
+4. 只写确实核对过的来源文件名、题号和资料 ID，不虚构“某年某区第几题”。找不到就明确写“题库未检索到”，不要用生成内容伪装成原题。
+
+## 组卷步骤
 
 1. 严格执行教师给定的题量、题型、年级和范围；没有指定范围时，以当前项目年级为边界，不擅自扩大到其他年级。
-2. 先做内部命题蓝图：考点、能力要求、情境、难度、题型和分值。小卷也要有基础、理解应用、综合探究的层次，避免连续多道纯概念回忆题。
-3. 每道题必须脱离原图也能独立作答。需要图表时，用完整的文字、数据表或在试卷中实际给出图，不能引用不存在的“如图”。交付前搜索“如图、下图、见图”，逐处确认图确实存在，否则改写。
-4. 单项选择题只能有一个最佳答案。三个干扰项要来自常见错误、单位换算、条件遗漏或错误模型，数值和表述都要有迷惑性，避免用 16m 身高、10m/s 步行速度这类一眼排除的荒谬量级凑选项。
-5. 填空题不拆成过多零碎记忆空；优先考信息读取、物理判断、数据处理和理由表达。
-6. 大题采用递进设问，至少覆盖计算、实验探究、证据解释中的两类。给出的数据必须够用且符合真实量级。
+2. 先做组卷蓝图：考点、能力要求、难度、题型和分值，再从原题候选表中匹配，不先写题再找出处。
+3. 避免同一情境或同一种解法重复堆叠；同等匹配时优先选择题干完整、答案明确、图片可交付的原题。
+4. 保持原题本身不变，只允许统一题号、版式、字体和分值标注。若必须删减或改动，不能再标为“原题”，必须标为“改编题”并记录改动内容。
 
 ## 交付前质量检查
 
-逐题独立作答后，再以挑错者身份检查：范围是否越界、条件是否充分、选择题是否唯一、单位和有效数字是否一致、数值是否可算、答案与解析是否一致、是否与来源题过度重复。不能只凭质量大小推断物体振动频率、音调等还受材料和结构影响的量；凡是结论需要额外条件，就必须在题干中给出。
+逐题对照原始资料，检查题干、选项、数据、图表、答案和题号是否一致；再独立作答，检查范围是否越界、条件是否充分、选择题是否唯一、单位是否一致、答案与解析是否匹配。不能因为排版方便而遗漏原图、表格或关键条件。
 
-实验结论必须与证据强度匹配：两组数据通常只能说明在给定条件下的变化关系，不能直接写“成正比”等更强结论。不能从单次实验或有限样本推出普遍规律。
+交付时同时给出：学生用试卷、答案与解析、选题来源表。来源表必须统计原题、改编题和题库缺口补充题的数量；有补充题时说明为什么没有选到原题。
 
-把完整试卷、答案和解析写入 \`artifacts/\`，优先生成便于继续编辑的 Markdown；教师指定 Word、PDF 或 HTML 时按要求生成。聊天中只给简短质量说明和清晰文件名，不重复粘贴整份试卷。桌面端会把交付文件显示为可预览、可打开的文件卡片。
+把完整成果写入 \`artifacts/\`。默认优先交付可继续编辑的 DOCX，其次是 PDF；Markdown 只作为内部中间稿，不作为面向教师的默认交付格式。聊天中只给简短说明、原题占比和清晰文件名，不重复粘贴整份试卷。桌面端会把交付文件显示为可预览、可打开的文件卡片。
 
 QUESTION_DESIGN_BUSINESS_MARKER
 `
@@ -181,7 +189,17 @@ export function installPhysicsTeacherSkills(paths: MagiPaths): {
     const directory = path.join(paths.skillsRoot, skill.name);
     const file = path.join(directory, "SKILL.md");
     if (existsSync(file)) {
-      skipped.push(skill.name);
+      const current = readFileSync(file, "utf8");
+      if (current === skill.body) {
+        skipped.push(skill.name);
+        continue;
+      }
+      if (!isManagedPhysicsTeacherSkill(current, skill.name)) {
+        skipped.push(skill.name);
+        continue;
+      }
+      writeFileSync(file, skill.body, { encoding: "utf8", mode: 0o600 });
+      installed.push(skill.name);
       continue;
     }
     mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -189,4 +207,15 @@ export function installPhysicsTeacherSkills(paths: MagiPaths): {
     installed.push(skill.name);
   }
   return { installed, skipped };
+}
+
+function isManagedPhysicsTeacherSkill(content: string, name: string): boolean {
+  if (!content.includes(`name: ${name}`)) return false;
+  if (name === "physics-question-design") {
+    return content.includes("QUESTION_DESIGN_BUSINESS_MARKER");
+  }
+  if (name === "physics-exam-analysis") {
+    return content.includes("EXAM_ANALYSIS_BUSINESS_MARKER");
+  }
+  return false;
 }

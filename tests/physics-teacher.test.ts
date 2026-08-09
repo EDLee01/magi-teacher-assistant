@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import http from "node:http";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -127,10 +127,17 @@ describe("Magi 教师助手 backend", () => {
     ]);
     expect(runtime.paths.projectsRoot).toContain("physics-teacher");
     expect(existsSync(`${runtime.magiPaths.skillsRoot}/physics-exam-analysis/SKILL.md`)).toBe(true);
-    expect(existsSync(`${runtime.magiPaths.skillsRoot}/physics-question-design/SKILL.md`)).toBe(
-      true
-    );
+    const questionSkillPath = `${runtime.magiPaths.skillsRoot}/physics-question-design/SKILL.md`;
+    expect(existsSync(questionSkillPath)).toBe(true);
     runtime.close();
+    writeFileSync(
+      questionSkillPath,
+      "---\nname: physics-question-design\n---\n旧版规则\nQUESTION_DESIGN_BUSINESS_MARKER\n",
+      "utf8"
+    );
+    runtime = createPhysicsTeacherRuntime(temp.env);
+    expect(readFileSync(questionSkillPath, "utf8")).toContain("原题优先原则");
+    expect(readFileSync(questionSkillPath, "utf8")).toContain("默认优先交付可继续编辑的 DOCX");
     expect(() => runtime!.close()).not.toThrow();
   });
 
@@ -164,7 +171,10 @@ describe("Magi 教师助手 backend", () => {
     expect(context).toContain("[本次已隐式采用的业务 Skill]");
     expect(context).toContain("physics-question-design");
     expect(context).toContain("QUESTION_DESIGN_BUSINESS_MARKER");
-    expect(context).toContain("把完整试卷、答案和解析写入");
+    expect(context).toContain("目标是可用原题占 100%");
+    expect(context).toContain("只要存在合适原题，就不能用 AI 自编题替代");
+    expect(context).toContain("默认优先交付可继续编辑的 DOCX");
+    expect(context).toContain("交付时同时给出：学生用试卷、答案与解析、选题来源表");
     expect(context).toContain("可预览、可打开的文件卡片");
     const match = resolvePhysicsTeacherSkill("请参考题库生成一套物理模拟题");
     expect(match?.name).toBe("physics-question-design");
@@ -310,6 +320,25 @@ describe("Magi 教师助手 backend", () => {
     expect(naturalLanguageSearch.items).toContainEqual(
       expect.objectContaining({ title: "学生成绩.csv", source: "教师上传资料" })
     );
+
+    service.uploadResource({
+      projectId: project.id,
+      filename: "声学原题库.txt",
+      body: Buffer.from(
+        `${"资料目录。".repeat(800)}\n（2022天河一模第5题）声音测试仪测得甲为50dB、乙为20dB，关于声音响度的判断正确的是（ ）\nA. 甲的响度更大 B. 乙的音调更高 C. 两者速度不同 D. 两者频率一定相同`
+      ),
+      mimeType: "text/plain"
+    });
+    const originalQuestionSearch = await service.searchResources({
+      projectId: project.id,
+      query: "请从题库找声音响度知识点的原题"
+    });
+    const originalQuestion = originalQuestionSearch.items.find(
+      (item) => item.title === "声学原题库.txt"
+    );
+    expect(originalQuestion?.snippet).toContain("2022天河一模第5题");
+    expect(originalQuestion?.snippet).toContain("甲为50dB、乙为20dB");
+    expect(originalQuestion?.snippet?.length).toBeLessThanOrEqual(1_502);
 
     const source = service.addRemoteResourceSource({
       projectId: project.id,

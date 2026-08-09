@@ -399,12 +399,10 @@ async function sendCurrentMessage(promptOverride) {
           permissionScope: state.permissionScope,
           files: attachments
         })
-      : await api("POST", `/api/sessions/${encodeURIComponent(state.session.id)}/messages`, {
-          json: {
-            prompt,
-            resourceQuery: prompt,
-            permissionScope: state.permissionScope
-          }
+      : await desktop.sendMessage({
+          sessionId: state.session.id,
+          prompt,
+          permissionScope: state.permissionScope
         });
     const fresh = await api("GET", `/api/sessions/${encodeURIComponent(state.session.id)}`);
     state.session = fresh.session;
