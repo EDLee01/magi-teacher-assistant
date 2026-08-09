@@ -22,7 +22,7 @@ import { executeHooks } from "./hooks/runner.js";
 export interface HeadlessResult {
   sessionId: string;
   jobId: string;
-  status?: "completed" | "recorded";
+  status?: "completed" | "recorded" | "cancelled";
   message: string;
   provider?: string;
   model?: string;

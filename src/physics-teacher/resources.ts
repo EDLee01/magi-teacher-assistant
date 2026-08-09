@@ -126,7 +126,9 @@ export class TeachingResourceGateway {
     query: string;
     limit?: number;
     filters?: Record<string, unknown>;
+    signal?: AbortSignal;
   }): Promise<TeachingResourceSearchResult> {
+    input.signal?.throwIfAborted();
     const query = input.query.trim();
     if (!query) throw new Error("query must not be empty");
     const limit = Math.min(Math.max(input.limit ?? 20, 1), 100);
@@ -142,7 +144,7 @@ export class TeachingResourceGateway {
 
     const remoteResults = await Promise.allSettled(
       remoteSources.map((source) =>
-        this.searchRemoteSource(source, query, limit, input.filters ?? {})
+        this.searchRemoteSource(source, query, limit, input.filters ?? {}, input.signal)
       )
     );
     const remote = remoteResults.flatMap((result) =>
@@ -167,7 +169,8 @@ export class TeachingResourceGateway {
     source: TeachingResourceSource,
     query: string,
     limit: number,
-    filters: Record<string, unknown>
+    filters: Record<string, unknown>,
+    signal?: AbortSignal
   ): Promise<TeachingResourceSearchItem[]> {
     const config = validateRemoteConfig(source.config, this.env);
     const url = new URL(config.searchPath ?? "/v1/search", ensureTrailingSlash(config.baseUrl));
@@ -182,7 +185,9 @@ export class TeachingResourceGateway {
       method: "POST",
       headers,
       body: JSON.stringify({ query, filters, limit }),
-      signal: AbortSignal.timeout(10_000)
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(10_000)])
+        : AbortSignal.timeout(10_000)
     });
     if (!response.ok) throw new Error(`资料接口请求失败：HTTP ${response.status}`);
     const contentLength = Number(response.headers.get("content-length") ?? 0);

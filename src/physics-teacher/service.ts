@@ -13,7 +13,7 @@ import {
 } from "../memory-draft.js";
 import { appendMemoryFile, initMemory, listMemoryFiles, readMemoryFile } from "../memory-files.js";
 import { MagiPaths } from "../paths.js";
-import { SessionRecord, SessionStore } from "../session-store.js";
+import { MessageRecord, SessionRecord, SessionStore } from "../session-store.js";
 import { ensurePhysicsTeacherHarness, ensurePhysicsTeacherProjectGit } from "./harness.js";
 import {
   PhysicsTeacherKnowledgeWikiSummary,
@@ -184,6 +184,8 @@ export class PhysicsTeacherService {
     resourceFilters?: Record<string, unknown>;
     attachments?: PhysicsTeacherMessageAttachmentInput[];
     permissionScope?: PhysicsTeacherPermissionScope;
+    followUpToMessageId?: number;
+    signal?: AbortSignal;
   }): Promise<HeadlessResult> {
     const { projectSession, session } = this.getSession(input.sessionId);
     const project = this.getProject(projectSession.projectId);
@@ -192,55 +194,68 @@ export class PhysicsTeacherService {
     }
     const projectPaths = this.projectPaths(project.id);
     const prompt = requireText(input.prompt, "prompt");
-    const businessSkill = resolvePhysicsTeacherSkill(prompt);
+    const turnStartMessageId = session.messages.at(-1)?.id ?? 0;
+    const followUp = resolveFollowUp(session, input.followUpToMessageId);
+    const businessSkill =
+      resolvePhysicsTeacherSkill(prompt) ??
+      (followUp?.previousUserMessage
+        ? resolvePhysicsTeacherSkill(followUp.previousUserMessage.content)
+        : undefined);
     const isQuestionDesign = businessSkill?.name === "physics-question-design";
-    const resourceContext = input.resourceQuery
-      ? await this.resources.search({
-          projectId: project.id,
-          query: isQuestionDesign
-            ? `${input.resourceQuery}\n原题 真题 试卷 题目 练习 答案 解析`
-            : input.resourceQuery,
-          limit: isQuestionDesign ? 50 : undefined,
-          filters: input.resourceFilters
-        })
-      : undefined;
+    const resourceQuery = buildFollowUpResourceQuery(input.resourceQuery, followUp);
+    const jobId = randomUUID();
     const permissionScope = normalizePermissionScope(input.permissionScope);
     const preparedAttachments = preparePhysicsTeacherMessageAttachments({
       projectPaths,
       attachments: input.attachments,
       env: this.env
     });
-    const contextMessageId = this.options.sessionStore.appendMessage({
-      sessionId: input.sessionId,
-      role: "system",
-      content: buildTeacherContext(
-        project,
-        resourceContext,
-        preparedAttachments.items,
-        permissionScope,
-        businessSkill
-      ),
-      metadata: {
-        source: "physics-teacher-context",
-        temporaryAttachments: preparedAttachments.items.map((attachment) => attachment.filename)
-      }
-    });
-    const config: MagiConfig = {
-      ...this.config,
-      memory: {
-        ...this.config.memory,
-        enabled: true,
-        root: projectPaths.memory,
-        autoWrite: "explicit",
-        scopes: ["project", "session"]
-      }
-    };
-    const runtimeEnv = buildPhysicsTeacherRuntimeEnv(this.env, project.rootDir);
+    let contextMessageId: number | undefined;
     try {
+      input.signal?.throwIfAborted();
+      const resourceContext = resourceQuery
+        ? await this.resources.search({
+            projectId: project.id,
+            query: isQuestionDesign
+              ? `${resourceQuery}\n原题 真题 试卷 题目 练习 答案 解析`
+              : resourceQuery,
+            limit: isQuestionDesign ? 50 : undefined,
+            filters: input.resourceFilters,
+            signal: input.signal
+          })
+        : undefined;
+      contextMessageId = this.options.sessionStore.appendMessage({
+        sessionId: input.sessionId,
+        role: "system",
+        content: buildTeacherContext(
+          project,
+          resourceContext,
+          preparedAttachments.items,
+          permissionScope,
+          businessSkill,
+          followUp
+        ),
+        metadata: {
+          source: "physics-teacher-context",
+          temporaryAttachments: preparedAttachments.items.map((attachment) => attachment.filename)
+        }
+      });
+      const config: MagiConfig = {
+        ...this.config,
+        memory: {
+          ...this.config.memory,
+          enabled: true,
+          root: projectPaths.memory,
+          autoWrite: "explicit",
+          scopes: ["project", "session"]
+        }
+      };
+      const runtimeEnv = buildPhysicsTeacherRuntimeEnv(this.env, project.rootDir);
       return await this.promptRunner({
         prompt: appendTemporaryAttachmentManifest(prompt, preparedAttachments.items),
         cwd: project.rootDir,
         sessionId: input.sessionId,
+        jobId,
         store: this.options.sessionStore,
         config,
         env: runtimeEnv,
@@ -253,11 +268,29 @@ export class PhysicsTeacherService {
             : "auto"),
         permissionMode: permissionScope === "approval" ? "default" : "dontAsk",
         approvalResolver: permissionScope === "approval" ? this.approvalResolver : undefined,
-        toolRules: buildPhysicsTeacherToolRules(permissionScope)
+        toolRules: buildPhysicsTeacherToolRules(permissionScope),
+        signal: input.signal
       });
+    } catch (error) {
+      if (!isCancelledRequest(error, input.signal)) throw error;
+      const message = "已停止本次生成。你可以修改要求后继续追问。";
+      persistCancelledTurn({
+        store: this.options.sessionStore,
+        sessionId: input.sessionId,
+        turnStartMessageId,
+        prompt: appendTemporaryAttachmentManifest(prompt, preparedAttachments.items),
+        message,
+        jobId
+      });
+      return {
+        sessionId: input.sessionId,
+        jobId,
+        status: "cancelled",
+        message
+      };
     } finally {
       preparedAttachments.cleanup();
-      if (preparedAttachments.items.length > 0) {
+      if (preparedAttachments.items.length > 0 && contextMessageId !== undefined) {
         this.options.sessionStore.deleteMessage({
           sessionId: input.sessionId,
           messageId: contextMessageId
@@ -444,7 +477,8 @@ function buildTeacherContext(
   resources?: TeachingResourceSearchResult,
   temporaryAttachments: PreparedPhysicsTeacherMessageAttachment[] = [],
   permissionScope: PhysicsTeacherPermissionScope = "project-write",
-  businessSkill?: PhysicsTeacherSkill
+  businessSkill?: PhysicsTeacherSkill,
+  followUp?: PhysicsTeacherFollowUp
 ): string {
   const resourceLines = resources?.items.length
     ? resources.items.flatMap((item) => [
@@ -485,6 +519,18 @@ function buildTeacherContext(
           "每道选中题必须核对来源、原题号、题干、选项、答案以及所依赖的原图；题库缺口才允许补充新题并明确标注。"
         ]
       : [];
+  const followUpLines = followUp
+    ? [
+        "",
+        "[本次为追问]",
+        `教师正在针对消息 #${followUp.target.id} 继续追问。`,
+        "必须结合本 Session 上一轮的要求和回答继续处理，不要把这条消息当作一个无上下文的新任务。",
+        followUp.previousUserMessage
+          ? `上一轮教师要求：${followUp.previousUserMessage.content.slice(0, 1_000)}`
+          : undefined,
+        `被追问回答摘要：${followUp.target.content.slice(0, 1_000)}`
+      ]
+    : [];
   return [
     "[当前物理教研项目]",
     `项目：${project.name}`,
@@ -499,6 +545,7 @@ function buildTeacherContext(
     "[项目知识库]",
     "知识库目录：workspace/wiki/INDEX.md。需要跨资料梳理时，先读取目录和分类页，再核对来源页与原文件。",
     ...questionBankLines,
+    ...followUpLines,
     "",
     "[当前权限范围]",
     permissionScopeDescription(permissionScope),
@@ -507,6 +554,73 @@ function buildTeacherContext(
   ]
     .filter((line): line is string => line !== undefined)
     .join("\n");
+}
+
+interface PhysicsTeacherFollowUp {
+  target: MessageRecord;
+  previousUserMessage?: MessageRecord;
+}
+
+function resolveFollowUp(
+  session: SessionRecord,
+  followUpToMessageId: number | undefined
+): PhysicsTeacherFollowUp | undefined {
+  if (followUpToMessageId === undefined) return undefined;
+  if (!Number.isSafeInteger(followUpToMessageId) || followUpToMessageId < 1) {
+    throw new Error("追问目标无效");
+  }
+  const target = session.messages.find((message) => message.id === followUpToMessageId);
+  if (!target || target.role !== "assistant") throw new Error("要追问的回答不存在");
+  const previousUserMessage = [...session.messages]
+    .reverse()
+    .find((message) => message.id < target.id && message.role === "user");
+  return { target, previousUserMessage };
+}
+
+function buildFollowUpResourceQuery(
+  resourceQuery: string | undefined,
+  followUp: PhysicsTeacherFollowUp | undefined
+): string | undefined {
+  const current = resourceQuery?.trim();
+  if (!followUp?.previousUserMessage) return current || undefined;
+  const previous = followUp.previousUserMessage.content.trim();
+  return [previous, current].filter(Boolean).join("\n") || undefined;
+}
+
+function isCancelledRequest(error: unknown, signal: AbortSignal | undefined): boolean {
+  return (
+    signal?.aborted === true ||
+    (error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && error.name === "AbortError")
+  );
+}
+
+function persistCancelledTurn(input: {
+  store: SessionStore;
+  sessionId: string;
+  turnStartMessageId: number;
+  prompt: string;
+  message: string;
+  jobId: string;
+}): void {
+  const messages = input.store.getSession(input.sessionId)?.messages ?? [];
+  const turnMessages = messages.filter((message) => message.id > input.turnStartMessageId);
+  if (!turnMessages.some((message) => message.role === "user")) {
+    input.store.appendMessage({
+      sessionId: input.sessionId,
+      role: "user",
+      content: input.prompt,
+      metadata: { source: "physics-teacher-cancelled-turn", jobId: input.jobId }
+    });
+  }
+  if (!turnMessages.some((message) => message.role === "assistant")) {
+    input.store.appendMessage({
+      sessionId: input.sessionId,
+      role: "assistant",
+      content: input.message,
+      metadata: { source: "physics-teacher-cancelled-turn", jobId: input.jobId }
+    });
+  }
 }
 
 function normalizePermissionScope(

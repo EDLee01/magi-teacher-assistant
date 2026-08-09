@@ -70,7 +70,7 @@ description: 当教师要根据课标、教材、现有学情或上次考试结�
     name: "physics-question-design",
     body: `---
 name: physics-question-design
-description: 当教师要求出题、命题、组卷、生成模拟题、改编题、同构题、复测卷，或要求参考本地题库设计物理试题时使用。
+description: 当教师要求从题库检索或筛选原题、出题、命题、组卷、生成模拟题、改编题、同构题、复测卷，或要求参考本地题库设计物理试题时使用。
 ---
 
 # 物理命题与组卷
@@ -149,7 +149,7 @@ export function resolvePhysicsTeacherSkill(prompt: string): PhysicsTeacherSkill 
   const normalized = prompt.trim();
   if (!normalized) return undefined;
   if (
-    /(出.{0,12}(题|试卷)|命题|组卷|模拟题|改编题|同构题|复测卷|生成.{0,8}(试题|题目|练习)|设计.{0,8}(试题|题目|练习))/.test(
+    /(出.{0,12}(题|试卷)|命题|组卷|模拟题|改编题|同构题|复测卷|生成.{0,8}(试题|题目|练习)|设计.{0,8}(试题|题目|练习)|题库.{0,12}(找|选|筛选|检索).{0,30}(原题|题目|试题))/.test(
       normalized
     )
   ) {

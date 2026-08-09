@@ -423,6 +423,111 @@ describe("Magi 教师助手 backend", () => {
     ).toBe(false);
   });
 
+  it("keeps the targeted answer and prior task when the teacher asks a follow-up", async () => {
+    let captured: Parameters<typeof runHeadlessPrompt>[0] | undefined;
+    const promptRunner: typeof runHeadlessPrompt = async (input) => {
+      captured = input;
+      return {
+        sessionId: input.sessionId!,
+        jobId: input.jobId!,
+        status: "completed",
+        message: "已按追问继续调整"
+      } satisfies HeadlessResult;
+    };
+    const { service } = setup({}, undefined, promptRunner);
+    const project = service.createProject({ name: "追问测试", grade: "九年级", className: "2班" });
+    const session = service.createSession({
+      projectId: project.id,
+      title: "声学原题筛选",
+      kind: "practice-adjustment"
+    });
+    sessionStore!.appendMessage({
+      sessionId: session.sessionId,
+      role: "user",
+      content: "从题库中找三道声音的响度和音调原题"
+    });
+    const assistantMessageId = sessionStore!.appendMessage({
+      sessionId: session.sessionId,
+      role: "assistant",
+      content: "已经找到三道广州中考原题，并逐题列出来源。"
+    });
+
+    await service.sendMessage({
+      sessionId: session.sessionId,
+      prompt: "第二道太简单了，换成难一点的",
+      resourceQuery: "第二道太简单了，换成难一点的",
+      followUpToMessageId: assistantMessageId
+    });
+
+    const context = sessionStore!
+      .getSession(session.sessionId)!
+      .messages.filter((message) => message.role === "system")
+      .at(-1)!.content;
+    expect(context).toContain("[本次为追问]");
+    expect(context).toContain(`消息 #${assistantMessageId}`);
+    expect(context).toContain("从题库中找三道声音的响度和音调原题");
+    expect(context).toContain("已经找到三道广州中考原题");
+    expect(context).toContain("physics-question-design");
+    expect(captured?.prompt).toBe("第二道太简单了，换成难一点的");
+    expect(captured?.jobId).toBeTruthy();
+    await expect(
+      service.sendMessage({
+        sessionId: session.sessionId,
+        prompt: "继续",
+        followUpToMessageId: 999_999
+      })
+    ).rejects.toThrow("要追问的回答不存在");
+  });
+
+  it("cancels a running teacher response and persists a resumable turn", async () => {
+    let started!: () => void;
+    const didStart = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const promptRunner: typeof runHeadlessPrompt = async (input) => {
+      input.store.appendMessage({
+        sessionId: input.sessionId!,
+        role: "user",
+        content: input.prompt
+      });
+      started();
+      await new Promise<never>((_resolve, reject) => {
+        const abort = () =>
+          reject(new DOMException(String(input.signal?.reason ?? "stopped"), "AbortError"));
+        if (input.signal?.aborted) abort();
+        else input.signal?.addEventListener("abort", abort, { once: true });
+      });
+      throw new Error("unreachable");
+    };
+    const { service } = setup({}, undefined, promptRunner);
+    const project = service.createProject({ name: "打断测试", grade: "八年级", className: "1班" });
+    const session = service.createSession({
+      projectId: project.id,
+      title: "长任务",
+      kind: "lesson-planning"
+    });
+    const controller = new AbortController();
+    const pending = service.sendMessage({
+      sessionId: session.sessionId,
+      prompt: "请整理一份完整的单元教学方案",
+      signal: controller.signal
+    });
+    await didStart;
+    controller.abort("教师停止了本次生成");
+    const result = await pending;
+
+    expect(result.status).toBe("cancelled");
+    expect(result.message).toContain("继续追问");
+    const messages = sessionStore!
+      .getSession(session.sessionId)!
+      .messages.filter((message) => message.role === "user" || message.role === "assistant");
+    expect(messages.at(-2)?.content).toContain("完整的单元教学方案");
+    expect(messages.at(-1)).toMatchObject({
+      role: "assistant",
+      content: "已停止本次生成。你可以修改要求后继续追问。"
+    });
+  });
+
   it("batch imports a folder-shaped resource stream and rebuilds the wiki once", async () => {
     const { service } = setup();
     const project = service.createProject({

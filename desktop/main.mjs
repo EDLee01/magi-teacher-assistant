@@ -26,6 +26,7 @@ let backend;
 let runtime;
 let desktopEnv;
 let quitting = false;
+const activeDesktopMessages = new Map();
 
 async function startDesktopBackend() {
   const token = randomBytes(32).toString("base64url");
@@ -144,6 +145,9 @@ function registerDesktopBridge(connection) {
   ipcMain.handle("physics-teacher:send-message-with-attachments", async (_event, input) =>
     sendDesktopMessage(input)
   );
+  ipcMain.handle("physics-teacher:cancel-message", async (_event, input) =>
+    cancelDesktopMessage(input)
+  );
 
   ipcMain.handle("physics-teacher:get-model-settings", () => {
     const settings = readPhysicsTeacherModelSettings(runtime.magiPaths, desktopEnv);
@@ -213,20 +217,57 @@ function registerDesktopBridge(connection) {
 
 async function sendDesktopMessage(input) {
   if (!runtime) throw new Error("本地 Magi Runtime 尚未启动");
+  const requestId = requireDesktopRequestId(input?.requestId);
+  const sessionId = typeof input?.sessionId === "string" ? input.sessionId : "";
+  if (activeDesktopMessages.has(requestId)) throw new Error("这次消息已经在处理中");
+  if ([...activeDesktopMessages.values()].some((request) => request.sessionId === sessionId)) {
+    throw new Error("当前 Session 已有一项任务正在运行");
+  }
+  const controller = new AbortController();
+  activeDesktopMessages.set(requestId, { sessionId, controller });
   const files = Array.isArray(input?.files) ? input.files : [];
   const prompt = typeof input?.prompt === "string" ? input.prompt : "";
-  const result = await runtime.service.sendMessage({
-    sessionId: typeof input?.sessionId === "string" ? input.sessionId : "",
-    prompt,
-    resourceQuery: prompt || undefined,
-    permissionScope: normalizePermissionScope(input?.permissionScope),
-    attachments: files.map((file) => ({
-      filename: typeof file?.name === "string" ? file.name : "attachment",
-      mimeType: typeof file?.contentType === "string" ? file.contentType : undefined,
-      body: Buffer.from(file?.bytes ?? [])
-    }))
-  });
-  return { result };
+  try {
+    const result = await runtime.service.sendMessage({
+      sessionId,
+      prompt,
+      resourceQuery: prompt || undefined,
+      permissionScope: normalizePermissionScope(input?.permissionScope),
+      followUpToMessageId: normalizeFollowUpMessageId(input?.followUpToMessageId),
+      signal: controller.signal,
+      attachments: files.map((file) => ({
+        filename: typeof file?.name === "string" ? file.name : "attachment",
+        mimeType: typeof file?.contentType === "string" ? file.contentType : undefined,
+        body: Buffer.from(file?.bytes ?? [])
+      }))
+    });
+    return { requestId, result };
+  } catch (error) {
+    if (!controller.signal.aborted) throw error;
+    return {
+      requestId,
+      result: {
+        sessionId,
+        jobId: requestId,
+        status: "cancelled",
+        message: "已停止本次生成。你可以修改要求后继续追问。"
+      }
+    };
+  } finally {
+    if (activeDesktopMessages.get(requestId)?.controller === controller) {
+      activeDesktopMessages.delete(requestId);
+    }
+  }
+}
+
+function cancelDesktopMessage(input) {
+  const requestId = requireDesktopRequestId(input?.requestId);
+  const active = activeDesktopMessages.get(requestId);
+  if (!active) return { cancelled: false, status: "finished" };
+  const sessionId = typeof input?.sessionId === "string" ? input.sessionId : "";
+  if (sessionId && active.sessionId !== sessionId) throw new Error("不能停止其他 Session 的任务");
+  active.controller.abort("教师停止了本次生成");
+  return { cancelled: true, status: "cancelling" };
 }
 
 function createWindow() {
@@ -257,6 +298,10 @@ function createWindow() {
 }
 
 async function shutdown() {
+  for (const request of activeDesktopMessages.values()) {
+    request.controller.abort("Magi 教师助手正在退出");
+  }
+  activeDesktopMessages.clear();
   if (backend?.server.listening) {
     await new Promise((resolve) => backend.server.close(resolve));
   }
@@ -385,6 +430,19 @@ function approvalToolLabel(name) {
 
 function normalizePermissionScope(value) {
   return value === "read-only" || value === "approval" ? value : "project-write";
+}
+
+function requireDesktopRequestId(value) {
+  const requestId = typeof value === "string" ? value.trim() : "";
+  if (!/^[a-zA-Z0-9_-]{8,100}$/.test(requestId)) throw new Error("消息请求标识无效");
+  return requestId;
+}
+
+function normalizeFollowUpMessageId(value) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const messageId = Number(value);
+  if (!Number.isSafeInteger(messageId) || messageId < 1) throw new Error("追问目标无效");
+  return messageId;
 }
 
 async function resolveProjectFile(input) {

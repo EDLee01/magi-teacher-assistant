@@ -33,11 +33,23 @@ const markdownResponse = [
 const providerServer = http.createServer(async (request, response) => {
   const chunks = [];
   for await (const chunk of request) chunks.push(Buffer.from(chunk));
+  const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
   providerRequests.push({
     url: request.url,
     authorization: request.headers.authorization,
-    body: JSON.parse(Buffer.concat(chunks).toString("utf8"))
+    body
   });
+  if (JSON.stringify(body).includes("用于测试打断的长任务")) {
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, 8_000);
+      timer.unref?.();
+      response.once("close", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+    if (response.destroyed) return;
+  }
   response.writeHead(200, { "content-type": "application/json" });
   response.end(
     JSON.stringify({
@@ -217,6 +229,52 @@ try {
   assert.equal(providerRequests[0].body.model, "physics-test-model");
   assert.match(JSON.stringify(providerRequests[0].body), /项目内读写/);
 
+  const followUpButton = markdownMessage.getByRole("button", { name: /继续追问/ });
+  await followUpButton.click();
+  await page.locator("#follow-up-target").waitFor({ state: "visible" });
+  assert.equal(
+    await page.locator("#composer-input").getAttribute("placeholder"),
+    "针对这条回答继续追问…"
+  );
+  assert.match((await page.locator("#follow-up-target").textContent()) || "", /模型接口联调成功/);
+  await page.locator("#composer-input").fill("继续追问：把刚才的回答压缩成两点");
+  await page.locator("#send-button").click();
+  await page.waitForFunction(() => document.querySelectorAll(".message.assistant").length >= 2);
+  assert.equal(providerRequests.length, 2);
+  assert.match(JSON.stringify(providerRequests[1].body), /本次为追问/);
+  assert.match(JSON.stringify(providerRequests[1].body), /把刚才的回答压缩成两点/);
+  assert.match(JSON.stringify(providerRequests[1].body), /模型接口联调成功/);
+
+  const temporaryMessageFile = path.join(temporaryRoot, "本次附件.csv");
+  await writeFile(temporaryMessageFile, "student,score\n赵同学,88\n");
+  await electronApp.evaluate(({ dialog }, filePath) => {
+    dialog.showOpenDialog = async (_window, options) =>
+      options?.title === "选择本次对话要处理的资料"
+        ? { canceled: false, filePaths: [filePath] }
+        : { canceled: true, filePaths: [] };
+  }, temporaryMessageFile);
+  await page.locator("#attach-message-button").click();
+  await page.locator("#message-attachment-list").filter({ hasText: "本次附件.csv" }).waitFor();
+  await page.locator("#composer-input").fill("分析这份临时成绩");
+  await page.locator("#send-button").click();
+  await page.locator("#message-attachment-list").waitFor({ state: "hidden" });
+  await page.locator(".message.user").last().filter({ hasText: "本次附件.csv" }).waitFor();
+  await page.waitForFunction(() => document.querySelectorAll(".message.assistant").length >= 3);
+  assert.equal(providerRequests.length, 3);
+
+  await page.locator("#composer-input").fill("用于测试打断的长任务：请持续整理整套资料");
+  await page.locator("#send-button").click();
+  await page.waitForFunction(
+    () => document.querySelector("#send-button")?.getAttribute("aria-label") === "停止生成"
+  );
+  await page.locator("#send-button").click();
+  await page
+    .locator(".message.assistant")
+    .filter({ hasText: "已停止本次生成。你可以修改要求后继续追问。" })
+    .waitFor();
+  assert.equal(await page.locator("#send-button").getAttribute("aria-label"), "发送");
+  assert.equal(providerRequests.length, 4);
+
   const oneTurnAttachment = await page.evaluate(async () => {
     const projects = await window.physicsTeacherDesktop.request({
       method: "GET",
@@ -229,6 +287,7 @@ try {
     });
     const response = await window.physicsTeacherDesktop.sendMessageWithAttachments({
       sessionId: sessions.data.sessions[0].sessionId,
+      requestId: "desktop-smoke-attachment",
       prompt: "只处理这次随堂测验",
       files: [
         {
@@ -246,9 +305,9 @@ try {
   });
   assert.equal(oneTurnAttachment.response.result.message, markdownResponse);
   assert.equal(oneTurnAttachment.resources.length, 0);
-  assert.equal(providerRequests.length, 2);
-  assert.match(JSON.stringify(providerRequests[1].body), /本次对话临时资料/);
-  assert.match(JSON.stringify(providerRequests[1].body), /随堂测验\.csv/);
+  assert.equal(providerRequests.length, 5);
+  assert.match(JSON.stringify(providerRequests[4].body), /本次对话临时资料/);
+  assert.match(JSON.stringify(providerRequests[4].body), /随堂测验\.csv/);
 
   const connectedData = await page.evaluate(async () => {
     const projects = await window.physicsTeacherDesktop.request({
@@ -301,7 +360,7 @@ try {
     await page.screenshot({ path: process.env.MAGI_TEACHER_DESKTOP_SCREENSHOT, fullPage: true });
   }
   process.stdout.write(
-    "Desktop smoke passed: inspector close, generated-file previews, uploaded-resource previews, folder scanning, project Wiki, chat attachments, model settings, resources, and memory review are connected.\n"
+    "Desktop smoke passed: follow-up, interrupt, cleared one-turn attachments, inspector close, generated-file previews, uploaded-resource previews, folder scanning, project Wiki, model settings, resources, and memory review are connected.\n"
   );
 } catch (error) {
   if (page && !page.isClosed()) {

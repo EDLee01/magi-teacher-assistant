@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("physicsTeacherDesktop", {
   sendMessage: (input) => ipcRenderer.invoke("physics-teacher:send-message", input),
   sendMessageWithAttachments: (input) =>
     ipcRenderer.invoke("physics-teacher:send-message-with-attachments", input),
+  cancelMessage: (input) => ipcRenderer.invoke("physics-teacher:cancel-message", input),
   getModelSettings: () => ipcRenderer.invoke("physics-teacher:get-model-settings"),
   saveModelSettings: (settings) =>
     ipcRenderer.invoke("physics-teacher:save-model-settings", settings),
