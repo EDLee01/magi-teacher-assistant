@@ -138,17 +138,21 @@ describe("Magi 教师助手 backend", () => {
     );
     runtime = createPhysicsTeacherRuntime(temp.env);
     expect(readFileSync(questionSkillPath, "utf8")).toContain("原题优先原则");
-    expect(readFileSync(questionSkillPath, "utf8")).toContain("默认优先交付可继续编辑的 DOCX");
+    expect(readFileSync(questionSkillPath, "utf8")).toContain("render_teacher_document.py");
     expect(() => runtime!.close()).not.toThrow();
   });
 
   it("implicitly loads the question-design workflow for natural teacher requests", async () => {
-    const promptRunner: typeof runHeadlessPrompt = async (input) => ({
-      sessionId: input.sessionId!,
-      jobId: "question-design-skill-test",
-      status: "completed",
-      message: "已完成十道题"
-    });
+    let captured: Parameters<typeof runHeadlessPrompt>[0] | undefined;
+    const promptRunner: typeof runHeadlessPrompt = async (input) => {
+      captured = input;
+      return {
+        sessionId: input.sessionId!,
+        jobId: "question-design-skill-test",
+        status: "completed",
+        message: "已完成十道题"
+      };
+    };
     const { service } = setup({}, undefined, promptRunner);
     const project = service.createProject({
       name: "初二物理",
@@ -174,9 +178,33 @@ describe("Magi 教师助手 backend", () => {
     expect(context).toContain("QUESTION_DESIGN_BUSINESS_MARKER");
     expect(context).toContain("目标是可用原题占 100%");
     expect(context).toContain("只要存在合适原题，就不能用 AI 自编题替代");
-    expect(context).toContain("默认优先交付可继续编辑的 DOCX");
+    expect(context).toContain("删除“如图”");
+    expect(context).toContain("不得把删改后的题目统计为原题");
+    expect(context).toContain("不会自动搬运来源文件中的图片");
+    expect(context).toContain("不能以“文字信息足够作答”为理由省略原图");
+    expect(context).toContain("[DOCX/PDF 交付方式]");
+    expect(context).toContain("render_teacher_document.py");
+    expect(context).toContain("本轮最多执行 8 次 FileRead/Grep/Glob 核对");
+    expect(context).toContain("原题只能从本候选包选择");
+    expect(context).toContain("不能用于新增候选");
     expect(context).toContain("交付时同时给出：学生用试卷、答案与解析、选题来源表");
     expect(context).toContain("可预览、可打开的文件卡片");
+    expect(
+      existsSync(`${project.rootDir}/workspace/analysis-scripts/render_teacher_document.py`)
+    ).toBe(true);
+    expect(captured?.toolExecutionGuard).toBeTypeOf("function");
+    for (let index = 0; index < 8; index += 1) {
+      expect(
+        captured!.toolExecutionGuard!({
+          toolUse: { type: "tool-use", id: `lookup-${index}`, name: "Grep", input: {} }
+        })
+      ).toBeUndefined();
+    }
+    expect(
+      captured!.toolExecutionGuard!({
+        toolUse: { type: "tool-use", id: "lookup-over-budget", name: "FileRead", input: {} }
+      })
+    ).toMatchObject({ isError: true, retryable: false });
     const match = resolvePhysicsTeacherSkill("请参考题库生成一套物理模拟题");
     expect(match?.name).toBe("physics-question-design");
     expect(physicsTeacherSkillInstructions(match!)).not.toContain("description:");
@@ -215,6 +243,8 @@ describe("Magi 教师助手 backend", () => {
     expect(context).toContain("Skill：physics-question-design");
     expect(context).toContain("QUESTION_DESIGN_BUSINESS_MARKER");
     expect(context).toContain("目标是可用原题占 100%");
+    expect(context).toContain("[按知识点与题型预筛的题库候选包]");
+    expect(context).toContain("不要再逐文件漫游搜索");
     expect(resolvePhysicsTeacherSkills(prompt).map((skill) => skill.name)).toEqual([
       "physics-exam-analysis",
       "physics-question-design"

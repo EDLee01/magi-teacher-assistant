@@ -37,6 +37,7 @@
     "test:teacher-skill": "npm run build && node scripts/teacher-skill-business-smoke.mjs",
     "test:teacher-live-exam": "npm run build && electron scripts/teacher-live-exam-bootstrap.cjs",
     "test:teacher-exam-rubric": "node scripts/teacher-exam-business-rubric-smoke.mjs",
+    "test:teacher-live-paper": "npm run build && electron scripts/teacher-live-followup-paper-bootstrap.cjs",
     "teacher:desktop": "npm run build && electron desktop/main.mjs",
     "teacher:serve": "npm run build && node dist/physics-teacher/cli.js",
     "test:ssh-localhost": "npm run build && node scripts/ssh-localhost-smoke.mjs",

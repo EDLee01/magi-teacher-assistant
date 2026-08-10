@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 import { MagiConfig } from "../config.js";
-import { HeadlessApprovalResolver, HeadlessResult, runHeadlessPrompt } from "../headless.js";
+import {
+  HeadlessApprovalResolver,
+  HeadlessResult,
+  HeadlessToolExecutionGuard,
+  runHeadlessPrompt
+} from "../headless.js";
 import {
   applyDraft,
   listDrafts,
@@ -14,6 +19,10 @@ import {
 import { appendMemoryFile, initMemory, listMemoryFiles, readMemoryFile } from "../memory-files.js";
 import { MagiPaths } from "../paths.js";
 import { MessageRecord, SessionRecord, SessionStore } from "../session-store.js";
+import {
+  ensurePhysicsTeacherDocumentRenderer,
+  PHYSICS_TEACHER_DOCUMENT_RENDERER_RELATIVE_PATH
+} from "./document-renderer.js";
 import { ensurePhysicsTeacherHarness, ensurePhysicsTeacherProjectGit } from "./harness.js";
 import {
   PhysicsTeacherKnowledgeWikiSummary,
@@ -32,6 +41,11 @@ import {
   PhysicsTeacherProjectPaths
 } from "./paths.js";
 import { PhysicsTeacherProjectStore } from "./project-store.js";
+import {
+  buildPhysicsQuestionCandidatePack,
+  PhysicsQuestionCandidate,
+  renderPhysicsQuestionCandidatePack
+} from "./question-bank-candidates.js";
 import { TeachingResourceGateway } from "./resources.js";
 import {
   physicsTeacherSkillInstructions,
@@ -120,6 +134,7 @@ export class PhysicsTeacherService {
     const projectPaths = getPhysicsTeacherProjectPaths(this.options.paths, id);
     ensurePhysicsTeacherProjectPaths(projectPaths);
     ensurePhysicsTeacherHarness(projectPaths.root);
+    ensurePhysicsTeacherDocumentRenderer(projectPaths);
     ensurePhysicsTeacherProjectGit(projectPaths.root);
     initMemory(this.memoryOptions(projectPaths));
 
@@ -196,6 +211,7 @@ export class PhysicsTeacherService {
       throw new Error("Session 工作目录与项目不一致");
     }
     const projectPaths = this.projectPaths(project.id);
+    ensurePhysicsTeacherDocumentRenderer(projectPaths);
     const prompt = requireText(input.prompt, "prompt");
     const turnStartMessageId = session.messages.at(-1)?.id ?? 0;
     const followUp = resolveFollowUp(session, input.followUpToMessageId);
@@ -230,6 +246,13 @@ export class PhysicsTeacherService {
             signal: input.signal
           })
         : undefined;
+      const questionCandidates = isQuestionDesign
+        ? buildPhysicsQuestionCandidatePack({
+            resources: this.listResources(project.id),
+            query: `${prompt}\n${resourceQuery ?? ""}`,
+            limit: 36
+          })
+        : [];
       contextMessageId = this.options.sessionStore.appendMessage({
         sessionId: input.sessionId,
         role: "system",
@@ -239,7 +262,8 @@ export class PhysicsTeacherService {
           preparedAttachments.items,
           permissionScope,
           businessSkills,
-          followUp
+          followUp,
+          questionCandidates
         ),
         metadata: {
           source: "physics-teacher-context",
@@ -275,6 +299,7 @@ export class PhysicsTeacherService {
         permissionMode: permissionScope === "approval" ? "default" : "dontAsk",
         approvalResolver: permissionScope === "approval" ? this.approvalResolver : undefined,
         toolRules: buildPhysicsTeacherToolRules(permissionScope),
+        toolExecutionGuard: isQuestionDesign ? createQuestionDesignLookupGuard(8) : undefined,
         signal: input.signal
       });
     } catch (error) {
@@ -506,7 +531,8 @@ function buildTeacherContext(
   temporaryAttachments: PreparedPhysicsTeacherMessageAttachment[] = [],
   permissionScope: PhysicsTeacherPermissionScope = "project-write",
   businessSkills: PhysicsTeacherSkill[] = [],
-  followUp?: PhysicsTeacherFollowUp
+  followUp?: PhysicsTeacherFollowUp,
+  questionCandidates: PhysicsQuestionCandidate[] = []
 ): string {
   const resourceLines = resources?.items.length
     ? resources.items.flatMap((item) => [
@@ -549,6 +575,30 @@ function buildTeacherContext(
         "每道选中题必须核对来源、原题号、题干、选项、答案以及所依赖的原图；题库缺口才允许补充新题并明确标注。"
       ]
     : [];
+  const questionCandidateLines = businessSkills.some(
+    (skill) => skill.name === "physics-question-design"
+  )
+    ? [
+        "",
+        "[按知识点与题型预筛的题库候选包]",
+        "候选包由后端扫描项目内全部已抽取正文生成，不只是标题检索结果。原题只能从本候选包选择；不要再逐文件漫游搜索，也不要把补充检索发现的包外题目加入试卷。",
+        "候选已排除答案-only、年报分析段落、残缺题干及文本中明确依赖图片/表格的题。FileRead/Grep/Glob 只能用于核对候选包内题目的原文件与答案，不能用于新增候选。某题型候选不足时直接标为题库缺口并补题，不能通过删除原图或改写包外题目凑原题。",
+        "本轮最多执行 8 次 FileRead/Grep/Glob 核对。达到预算后必须停止检索，使用已核对候选完成交付；仍不可靠的题标为题库缺口，不能继续漫游搜索。",
+        ...renderPhysicsQuestionCandidatePack(questionCandidates)
+      ]
+    : [];
+  const artifactDeliveryLines = businessSkills.some(
+    (skill) => skill.name === "physics-question-design"
+  )
+    ? [
+        "",
+        "[DOCX/PDF 交付方式]",
+        `项目已安装受控渲染器：${PHYSICS_TEACHER_DOCUMENT_RENDERER_RELATIVE_PATH}。不要自行拼装 DOCX/PDF 二进制文件。`,
+        "先用一次 FileWrite 把完整成果写成 artifacts/<文件名>.md，再运行：",
+        `python3 ${PHYSICS_TEACHER_DOCUMENT_RENDERER_RELATIVE_PATH} --input artifacts/<文件名>.md --docx artifacts/<文件名>.docx --pdf artifacts/<文件名>.pdf`,
+        "渲染成功后在聊天中只报告题型数量、原题占比以及 DOCX/PDF 文件名。"
+      ]
+    : [];
   const followUpLines = followUp
     ? [
         "",
@@ -577,6 +627,8 @@ function buildTeacherContext(
     "[项目知识库]",
     "知识库目录：workspace/wiki/INDEX.md。需要跨资料梳理时，先读取目录和分类页，再核对来源页与原文件。",
     ...questionBankLines,
+    ...questionCandidateLines,
+    ...artifactDeliveryLines,
     ...followUpLines,
     "",
     "[当前权限范围]",
@@ -601,6 +653,23 @@ function mergePhysicsTeacherSkills(
   const merged = new Map<string, PhysicsTeacherSkill>();
   for (const skill of [...current, ...previous]) merged.set(skill.name, skill);
   return [...merged.values()];
+}
+
+function createQuestionDesignLookupGuard(limit: number): HeadlessToolExecutionGuard {
+  let lookupCount = 0;
+  return ({ toolUse }) => {
+    if (!new Set(["FileRead", "Grep", "Glob"]).has(toolUse.name)) return undefined;
+    lookupCount += 1;
+    if (lookupCount <= limit) return undefined;
+    return {
+      toolCallId: toolUse.id,
+      toolName: toolUse.name,
+      content:
+        "题库核对预算已用完。请立即停止检索，使用候选包和已核对内容完成组卷；不可靠的候选应标为题库缺口。现在写入 artifacts/ 中间稿并调用受控渲染器生成 DOCX/PDF。",
+      isError: true,
+      retryable: false
+    };
+  };
 }
 
 function resolveFollowUp(

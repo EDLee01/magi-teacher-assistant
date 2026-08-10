@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { runLocalHeadlessAgent } from "./agent/headless-agent.js";
 import { AgentQueryEvent } from "./agent/query.js";
 import { QueryEngine } from "./agent/query-engine.js";
-import { ToolPermissionMode } from "./agent/tools.js";
+import { AgentToolResult, ToolPermissionMode } from "./agent/tools.js";
 import { MagiConfig } from "./config.js";
 import { MagiPaths } from "./paths.js";
 import { buildProviderRegistry } from "./providers/registry.js";
@@ -36,6 +36,10 @@ export type HeadlessApprovalResolver = (request: {
   diff?: string;
 }) => Promise<boolean> | boolean;
 
+export type HeadlessToolExecutionGuard = (request: {
+  toolUse: MagiToolUsePart;
+}) => AgentToolResult | undefined;
+
 export function runHeadlessPrompt(input: {
   prompt: string;
   cwd: string;
@@ -61,6 +65,7 @@ export function runHeadlessPrompt(input: {
   signal?: AbortSignal;
   onStreamEvent?: (event: AgentQueryEvent) => void;
   stream?: boolean;
+  toolExecutionGuard?: HeadlessToolExecutionGuard;
 }): Promise<HeadlessResult> {
   return runHeadlessPromptAsync(input);
 }
@@ -90,6 +95,7 @@ async function runHeadlessPromptAsync(input: {
   signal?: AbortSignal;
   onStreamEvent?: (event: AgentQueryEvent) => void;
   stream?: boolean;
+  toolExecutionGuard?: HeadlessToolExecutionGuard;
 }): Promise<HeadlessResult> {
   const shouldPersist = input.persistSession ?? true;
 
@@ -157,6 +163,7 @@ async function runPersistedHeadless(
     signal?: AbortSignal;
     onStreamEvent?: (event: AgentQueryEvent) => void;
     stream?: boolean;
+    toolExecutionGuard?: HeadlessToolExecutionGuard;
   },
   sessionId: string,
   jobId: string
@@ -263,6 +270,7 @@ async function runPersistedHeadless(
       signal: input.signal,
       onStreamEvent: input.onStreamEvent,
       stream: input.stream,
+      toolExecutionGuard: input.toolExecutionGuard,
       mcp: input.config.mcp,
       spawnSubAgent: buildSpawnSubAgent({
         store: input.store,

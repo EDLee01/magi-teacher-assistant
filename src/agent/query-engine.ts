@@ -87,6 +87,7 @@ export interface QueryEngineInput {
   signal?: AbortSignal;
   onStreamEvent?: (event: AgentQueryEvent) => void;
   stream?: boolean;
+  toolExecutionGuard?: (request: { toolUse: MagiToolUsePart }) => AgentToolResult | undefined;
   contextOptions?: {
     recentMessages?: number;
     autoCompactTokenThreshold?: number;
@@ -208,7 +209,9 @@ export class QueryEngine {
           }
         : undefined,
       onStreamEvent: this.input.onStreamEvent,
-      toolExecutionGuard: ({ toolUse }) => this.applyPlanExecutionGuard(jobId, toolUse),
+      toolExecutionGuard: ({ toolUse }) =>
+        this.input.toolExecutionGuard?.({ toolUse }) ??
+        this.applyPlanExecutionGuard(jobId, toolUse),
       stream: this.input.stream
     });
 
