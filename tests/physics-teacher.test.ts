@@ -130,8 +130,10 @@ describe("Magi 教师助手 backend", () => {
     expect(existsSync(`${runtime.magiPaths.skillsRoot}/physics-exam-analysis/SKILL.md`)).toBe(true);
     const questionSkillPath = `${runtime.magiPaths.skillsRoot}/physics-question-design/SKILL.md`;
     const lessonSkillPath = `${runtime.magiPaths.skillsRoot}/physics-lesson-planning/SKILL.md`;
+    const homeworkSkillPath = `${runtime.magiPaths.skillsRoot}/physics-homework-guidance/SKILL.md`;
     expect(existsSync(questionSkillPath)).toBe(true);
     expect(existsSync(lessonSkillPath)).toBe(true);
+    expect(existsSync(homeworkSkillPath)).toBe(true);
     runtime.close();
     writeFileSync(
       questionSkillPath,
@@ -143,11 +145,18 @@ describe("Magi 教师助手 backend", () => {
       "---\nname: physics-lesson-planning\n---\n# 物理教师备课\n3. 组织“情境或现象—学生预测—实验/推理—表达—练习—当堂检查”的课堂链路。\n",
       "utf8"
     );
+    writeFileSync(
+      homeworkSkillPath,
+      "---\nname: physics-homework-guidance\n---\n# 物理作业辅导与调整\n3. 给学生辅导时先问关键判断或给一级提示，再逐级增加提示；不要一开始直接抄出完整答案。\n",
+      "utf8"
+    );
     runtime = createPhysicsTeacherRuntime(temp.env);
     expect(readFileSync(questionSkillPath, "utf8")).toContain("原题优先原则");
     expect(readFileSync(questionSkillPath, "utf8")).toContain("render_teacher_document.py");
     expect(readFileSync(lessonSkillPath, "utf8")).toContain("LESSON_PLANNING_BUSINESS_MARKER");
     expect(readFileSync(lessonSkillPath, "utf8")).toContain("所有“用时”相加");
+    expect(readFileSync(homeworkSkillPath, "utf8")).toContain("HOMEWORK_GUIDANCE_BUSINESS_MARKER");
+    expect(readFileSync(homeworkSkillPath, "utf8")).toContain("通过、部分通过、未通过");
     runtime.close();
     const customLessonSkill =
       "---\nname: physics-lesson-planning\n---\n# 物理教师备课\n这是教师自行维护的备课流程。\n";
@@ -202,6 +211,7 @@ describe("Magi 教师助手 backend", () => {
     expect(context).toContain("本轮最多执行 8 次 FileRead/Grep/Glob 核对");
     expect(context).toContain("原题只能从本候选包选择");
     expect(context).toContain("不能用于新增候选");
+    expect(context).toContain("不能仅因原文件没有参考答案就把它降为题库缺口");
     expect(context).toContain("交付时同时给出：学生用试卷、答案与解析、选题来源表");
     expect(context).toContain("可预览、可打开的文件卡片");
     expect(
@@ -304,6 +314,91 @@ describe("Magi 教师助手 backend", () => {
     expect(context).toContain("[DOCX/PDF 交付方式]");
     expect(context).toContain("只报告课题、总时长以及 DOCX/PDF 文件名");
     expect(captured?.prompt).toContain("45分钟讲评课");
+  });
+
+  it("implicitly loads layered homework guidance and DOCX/PDF delivery", async () => {
+    let captured: Parameters<typeof runHeadlessPrompt>[0] | undefined;
+    const promptRunner: typeof runHeadlessPrompt = async (input) => {
+      captured = input;
+      return {
+        sessionId: input.sessionId!,
+        jobId: "homework-guidance-skill-test",
+        status: "completed",
+        message: "分层作业已生成"
+      };
+    };
+    const { service } = setup({}, undefined, promptRunner);
+    const project = service.createProject({
+      name: "初二物理",
+      grade: "初二",
+      className: "1班"
+    });
+    const session = service.createSession({
+      projectId: project.id,
+      title: "错题分层作业",
+      kind: "practice-adjustment"
+    });
+
+    await service.sendMessage({
+      sessionId: session.sessionId,
+      prompt: "根据这次错题，做一份基础巩固、针对纠错、迁移挑战的分层作业辅导和复测安排"
+    });
+
+    const context = sessionStore!
+      .getSession(session.sessionId)!
+      .messages.find((message) => message.role === "system")!.content;
+    expect(context).toContain("Skill：physics-homework-guidance");
+    expect(context).toContain("HOMEWORK_GUIDANCE_BUSINESS_MARKER");
+    expect(context).toContain("一级提示只问关键判断");
+    expect(context).toContain("不能泄露最终数值、选项、状态、方向或比较符号");
+    expect(context).toContain("不能写成“f=F=20 N”");
+    expect(context).toContain("不能把物体整体运动方向直接当成摩擦力方向");
+    expect(context).toContain("不能写“用手按住保持压力”后又“松手”");
+    expect(context).toContain("通过、部分通过、未通过");
+    expect(context).toContain("[DOCX/PDF 交付方式]");
+    expect(context).toContain("只报告分层结构、题量以及 DOCX/PDF 文件名");
+    expect(captured?.prompt).toContain("分层作业辅导");
+  });
+
+  it("keeps every confirmed diagnostic datum in follow-up homework context", async () => {
+    const promptRunner: typeof runHeadlessPrompt = async (input) => ({
+      sessionId: input.sessionId!,
+      jobId: "homework-follow-up-evidence-test",
+      status: "completed",
+      message: "分层作业已生成"
+    });
+    const { service } = setup({}, undefined, promptRunner);
+    const project = service.createProject({
+      name: "初二物理",
+      grade: "初二",
+      className: "1班"
+    });
+    const session = service.createSession({
+      projectId: project.id,
+      title: "检测后作业",
+      kind: "practice-adjustment"
+    });
+    sessionStore!.appendMessage({
+      sessionId: session.sessionId,
+      role: "user",
+      content: "分析这次三题检测"
+    });
+    sessionStore!.appendMessage({
+      sessionId: session.sessionId,
+      role: "assistant",
+      content: "第1题8/10，第2题4/10，第3题6/10"
+    });
+
+    await service.sendMessage({
+      sessionId: session.sessionId,
+      prompt: "继续做一份基础巩固、针对纠错、迁移挑战的分层作业"
+    });
+
+    const context = sessionStore!
+      .getSession(session.sessionId)!
+      .messages.find((message) => message.metadata.source === "physics-teacher-context")!.content;
+    expect(context).toContain("第1题8/10，第2题4/10，第3题6/10");
+    expect(context).toContain("数据事实必须逐项保留");
   });
 
   it("isolates projects while sharing Magi memory across sessions in one project", () => {

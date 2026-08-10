@@ -583,12 +583,16 @@ function buildTeacherContext(
         "[按知识点与题型预筛的题库候选包]",
         "候选包由后端扫描项目内全部已抽取正文生成，不只是标题检索结果。原题只能从本候选包选择；不要再逐文件漫游搜索，也不要把补充检索发现的包外题目加入试卷。",
         "候选已排除答案-only、年报分析段落、残缺题干及文本中明确依赖图片/表格的题。FileRead/Grep/Glob 只能用于核对候选包内题目的原文件与答案，不能用于新增候选。某题型候选不足时直接标为题库缺口并补题，不能通过删除原图或改写包外题目凑原题。",
+        "候选未附同源答案时，若题干与条件完整且独立作答能得到唯一答案，仍应使用并在来源表标注“答案独立复核”；不能仅因原文件没有参考答案就把它降为题库缺口。",
         "本轮最多执行 8 次 FileRead/Grep/Glob 核对。达到预算后必须停止检索，使用已核对候选完成交付；仍不可靠的题标为题库缺口，不能继续漫游搜索。",
         ...renderPhysicsQuestionCandidatePack(questionCandidates)
       ]
     : [];
   const artifactDeliveryLines = businessSkills.some(
-    (skill) => skill.name === "physics-question-design" || skill.name === "physics-lesson-planning"
+    (skill) =>
+      skill.name === "physics-question-design" ||
+      skill.name === "physics-lesson-planning" ||
+      skill.name === "physics-homework-guidance"
   )
     ? [
         "",
@@ -598,7 +602,9 @@ function buildTeacherContext(
         `python3 ${PHYSICS_TEACHER_DOCUMENT_RENDERER_RELATIVE_PATH} --input artifacts/<文件名>.md --docx artifacts/<文件名>.docx --pdf artifacts/<文件名>.pdf`,
         businessSkills.some((skill) => skill.name === "physics-question-design")
           ? "渲染成功后在聊天中只报告题型数量、原题占比以及 DOCX/PDF 文件名。"
-          : "渲染成功后在聊天中只报告课题、总时长以及 DOCX/PDF 文件名，不要把完整教案粘贴进聊天。"
+          : businessSkills.some((skill) => skill.name === "physics-lesson-planning")
+            ? "渲染成功后在聊天中只报告课题、总时长以及 DOCX/PDF 文件名，不要把完整教案粘贴进聊天。"
+            : "渲染成功后在聊天中只报告分层结构、题量以及 DOCX/PDF 文件名，不要把完整作业粘贴进聊天。"
       ]
     : [];
   const followUpLines = followUp
@@ -609,6 +615,7 @@ function buildTeacherContext(
           ? `教师正在针对消息 #${followUp.target.id} 继续追问。`
           : "教师在同一个 Session 中直接继续输入，这是上一轮工作的自然延续。",
         "必须结合本 Session 上一轮的要求和回答继续处理，不要把这条消息当作一个无上下文的新任务。",
+        "如果本轮引用上一轮诊断，上一轮已经明确的题号、人数、正确率、得分率等数据事实必须逐项保留，不能只摘录其中最低的一项。",
         followUp.previousUserMessage
           ? `上一轮教师要求：${followUp.previousUserMessage.content.slice(0, 1_000)}`
           : undefined,

@@ -58,6 +58,7 @@ describe("physics question-bank candidate pack", () => {
       expect.arrayContaining(["摩擦力", "浮力"])
     );
     expect(renderPhysicsQuestionCandidatePack(candidates).join("\n")).toContain("候选 1");
+    expect(renderPhysicsQuestionCandidatePack(candidates).join("\n")).toContain("答案独立复核");
   });
 });
 

@@ -127,7 +127,7 @@ export function renderPhysicsQuestionCandidatePack(
       `- 来源文件：${candidate.sourceTitle}`,
       `- 资料 ID：${candidate.sourceId}`,
       candidate.importPath ? `- 导入位置：${candidate.importPath}` : undefined,
-      `- 答案证据：${candidate.answerEvidence ? "当前片段或来源标题含答案/解析线索" : "需到同源答案或解析文件核对"}`,
+      `- 答案证据：${candidate.answerEvidence ? "当前片段或来源标题含答案/解析线索" : "当前片段未附答案；题干条件完整且独立作答可得唯一答案时仍可作为原题，来源表标注“答案独立复核”"}`,
       "- 图片依赖：未检测到“如图/见图”等标记；交付前仍需核对原文件",
       "- 题目片段：",
       candidate.excerpt,
