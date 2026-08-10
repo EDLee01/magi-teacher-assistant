@@ -58,13 +58,27 @@ description: 当教师要根据课标、教材、现有学情或上次考试结�
 
 # 物理教师备课
 
-1. 明确课题、课时、教材版本、学生已有基础和可用资料。
-2. 从已有证据中确定本节课真正要解决的一到两个学习困难。
-3. 组织“情境或现象—学生预测—实验/推理—表达—练习—当堂检查”的课堂链路。
-4. 对每个活动写清教师做什么、学生做什么、预计用时和用什么证据判断学会了。
-5. 最后检查教学目标、课堂活动、例题、作业和评价是否一致。
+1. 明确课题、总课时、教材版本、学生已有基础和可用资料。使用考试结果时，把已确认的数据事实与仍需核实的错因分开。
+2. 从已有证据中确定本节课真正要解决的一到两个学习困难；每个困难必须能追溯到题号、得分率、学生作答或项目资料。
+3. 写出可在一节课内观察到的学习目标，不用“掌握、理解、提高”作为无法检查的空泛目标。
+4. 组织“现象或错例—学生判断—实验/推理—表达—针对练习—当堂检查”的课堂链路。
+5. 课堂流程必须逐环节写清：用时：X分钟、教师做什么、学生做什么、需要的材料以及用什么学习证据判断是否学会。所有“用时”相加必须等于教师指定的总时长。
+6. 至少设计一次让学生先暴露原有想法的任务，以及一项能区分“会套公式”和“理解物理过程”的当堂检测。
+7. 给出板书结构、分层作业/复测安排和教师课后需要记录的观察点；最后检查目标、活动、例题、作业和评价是否一致。
 
-输出一份教师可以直接修改的课时方案；资料不足时先列出需要补充的内容，不虚构教材页码或学生表现。
+## 输出
+
+- 备课依据与分析边界
+- 本课要解决的问题及可观察目标
+- 按分钟展开的课堂流程（每环节明确写“用时：X分钟”）
+- 板书设计
+- 当堂检测与答案/判断标准
+- 分层作业与复测
+- 仍需教师确认的问题
+
+输出一份教师可以直接修改的课时方案；引用项目资料时列出来源文件名和资料 ID。资料不足时明确缺什么，不虚构课标条目、教材页码或学生表现。
+
+LESSON_PLANNING_BUSINESS_MARKER
 `
   },
   {
@@ -165,7 +179,7 @@ export function resolvePhysicsTeacherSkills(prompt: string): PhysicsTeacherSkill
   ) {
     matched.push(skillByName("physics-question-design"));
   }
-  if (/(备课|教案|课时方案|实验课|复习课|课堂活动)/.test(normalized)) {
+  if (/(备课|教案|课时方案|讲评课|实验课|复习课|课堂活动)/.test(normalized)) {
     matched.push(skillByName("physics-lesson-planning"));
   }
   if (/(作业|错题|分层练习|作业辅导|答案反馈|逐级提示)/.test(normalized)) {
@@ -223,6 +237,13 @@ function isManagedPhysicsTeacherSkill(content: string, name: string): boolean {
   }
   if (name === "physics-exam-analysis") {
     return content.includes("EXAM_ANALYSIS_BUSINESS_MARKER");
+  }
+  if (name === "physics-lesson-planning") {
+    return (
+      content.includes("LESSON_PLANNING_BUSINESS_MARKER") ||
+      (content.includes("# 物理教师备课") &&
+        content.includes("组织“情境或现象—学生预测—实验/推理—表达—练习—当堂检查”的课堂链路"))
+    );
   }
   return false;
 }

@@ -129,16 +129,31 @@ describe("Magi 教师助手 backend", () => {
     expect(runtime.paths.projectsRoot).toContain("physics-teacher");
     expect(existsSync(`${runtime.magiPaths.skillsRoot}/physics-exam-analysis/SKILL.md`)).toBe(true);
     const questionSkillPath = `${runtime.magiPaths.skillsRoot}/physics-question-design/SKILL.md`;
+    const lessonSkillPath = `${runtime.magiPaths.skillsRoot}/physics-lesson-planning/SKILL.md`;
     expect(existsSync(questionSkillPath)).toBe(true);
+    expect(existsSync(lessonSkillPath)).toBe(true);
     runtime.close();
     writeFileSync(
       questionSkillPath,
       "---\nname: physics-question-design\n---\n旧版规则\nQUESTION_DESIGN_BUSINESS_MARKER\n",
       "utf8"
     );
+    writeFileSync(
+      lessonSkillPath,
+      "---\nname: physics-lesson-planning\n---\n# 物理教师备课\n3. 组织“情境或现象—学生预测—实验/推理—表达—练习—当堂检查”的课堂链路。\n",
+      "utf8"
+    );
     runtime = createPhysicsTeacherRuntime(temp.env);
     expect(readFileSync(questionSkillPath, "utf8")).toContain("原题优先原则");
     expect(readFileSync(questionSkillPath, "utf8")).toContain("render_teacher_document.py");
+    expect(readFileSync(lessonSkillPath, "utf8")).toContain("LESSON_PLANNING_BUSINESS_MARKER");
+    expect(readFileSync(lessonSkillPath, "utf8")).toContain("所有“用时”相加");
+    runtime.close();
+    const customLessonSkill =
+      "---\nname: physics-lesson-planning\n---\n# 物理教师备课\n这是教师自行维护的备课流程。\n";
+    writeFileSync(lessonSkillPath, customLessonSkill, "utf8");
+    runtime = createPhysicsTeacherRuntime(temp.env);
+    expect(readFileSync(lessonSkillPath, "utf8")).toBe(customLessonSkill);
     expect(() => runtime!.close()).not.toThrow();
   });
 
@@ -249,6 +264,46 @@ describe("Magi 教师助手 backend", () => {
       "physics-exam-analysis",
       "physics-question-design"
     ]);
+  });
+
+  it("implicitly loads evidence-based lesson planning and DOCX/PDF delivery", async () => {
+    let captured: Parameters<typeof runHeadlessPrompt>[0] | undefined;
+    const promptRunner: typeof runHeadlessPrompt = async (input) => {
+      captured = input;
+      return {
+        sessionId: input.sessionId!,
+        jobId: "lesson-planning-skill-test",
+        status: "completed",
+        message: "45分钟讲评课已生成"
+      };
+    };
+    const { service } = setup({}, undefined, promptRunner);
+    const project = service.createProject({
+      name: "初二物理",
+      grade: "初二",
+      className: "1班"
+    });
+    const session = service.createSession({
+      projectId: project.id,
+      title: "期中讲评课备课",
+      kind: "lesson-planning"
+    });
+
+    await service.sendMessage({
+      sessionId: session.sessionId,
+      prompt: "根据Q3滑动摩擦力50%、Q4浮力58%的结果，准备一节45分钟讲评课"
+    });
+
+    const context = sessionStore!
+      .getSession(session.sessionId)!
+      .messages.find((message) => message.role === "system")!.content;
+    expect(context).toContain("Skill：physics-lesson-planning");
+    expect(context).toContain("LESSON_PLANNING_BUSINESS_MARKER");
+    expect(context).toContain("用时：X分钟");
+    expect(context).toContain("教师做什么、学生做什么");
+    expect(context).toContain("[DOCX/PDF 交付方式]");
+    expect(context).toContain("只报告课题、总时长以及 DOCX/PDF 文件名");
+    expect(captured?.prompt).toContain("45分钟讲评课");
   });
 
   it("isolates projects while sharing Magi memory across sessions in one project", () => {

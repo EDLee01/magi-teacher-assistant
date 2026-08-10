@@ -588,7 +588,7 @@ function buildTeacherContext(
       ]
     : [];
   const artifactDeliveryLines = businessSkills.some(
-    (skill) => skill.name === "physics-question-design"
+    (skill) => skill.name === "physics-question-design" || skill.name === "physics-lesson-planning"
   )
     ? [
         "",
@@ -596,7 +596,9 @@ function buildTeacherContext(
         `项目已安装受控渲染器：${PHYSICS_TEACHER_DOCUMENT_RENDERER_RELATIVE_PATH}。不要自行拼装 DOCX/PDF 二进制文件。`,
         "先用一次 FileWrite 把完整成果写成 artifacts/<文件名>.md，再运行：",
         `python3 ${PHYSICS_TEACHER_DOCUMENT_RENDERER_RELATIVE_PATH} --input artifacts/<文件名>.md --docx artifacts/<文件名>.docx --pdf artifacts/<文件名>.pdf`,
-        "渲染成功后在聊天中只报告题型数量、原题占比以及 DOCX/PDF 文件名。"
+        businessSkills.some((skill) => skill.name === "physics-question-design")
+          ? "渲染成功后在聊天中只报告题型数量、原题占比以及 DOCX/PDF 文件名。"
+          : "渲染成功后在聊天中只报告课题、总时长以及 DOCX/PDF 文件名，不要把完整教案粘贴进聊天。"
       ]
     : [];
   const followUpLines = followUp
