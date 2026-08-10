@@ -210,6 +210,21 @@ export class PhysicsTeacherProjectStore {
     return row ? toResource(row) : undefined;
   }
 
+  updateResourceSearchText(input: {
+    resourceId: string;
+    excerpt: string;
+    metadata: Record<string, unknown>;
+  }): TeachingResource {
+    const excerpt = input.excerpt.trim();
+    if (!excerpt) throw new Error("excerpt must not be empty");
+    this.db
+      .prepare("update physics_resources set excerpt = ?, metadata_json = ? where id = ?")
+      .run(excerpt, encodeJson(input.metadata), input.resourceId);
+    const resource = this.getResource(input.resourceId);
+    if (!resource) throw new Error("Resource not found");
+    return resource;
+  }
+
   findResourceByChecksum(projectId: string, checksumSha256: string): TeachingResource | undefined {
     const row = this.db
       .prepare(

@@ -114,6 +114,7 @@ function registerDesktopBridge(connection) {
       duplicateCount: imported.duplicateCount,
       skippedUnsupported: selection.skippedUnsupported,
       skippedOversized: selection.skippedOversized,
+      skippedTemporary: selection.skippedTemporary,
       wiki: imported.wiki
     };
   });
@@ -415,9 +416,7 @@ async function requestDesktopApproval(request) {
     `操作：${approvalToolLabel(request.toolUse?.name)}`,
     `目标：${String(target).slice(0, 500)}`,
     request.reason ? `原因：${request.reason}` : undefined,
-    isMemoryDraft
-      ? "说明：允许后只会生成一条待确认草稿，不会直接写入长期项目记忆。"
-      : undefined,
+    isMemoryDraft ? "说明：允许后只会生成一条待确认草稿，不会直接写入长期项目记忆。" : undefined,
     request.diff ? `\n变更预览：\n${request.diff.slice(0, 4_000)}` : undefined
   ]
     .filter(Boolean)
@@ -425,9 +424,7 @@ async function requestDesktopApproval(request) {
   const result = await dialog.showMessageBox(mainWindow, {
     type: "question",
     title: "Magi 请求操作权限",
-    message: isMemoryDraft
-      ? "允许 Magi 创建这条待确认记忆草稿吗？"
-      : "允许 Magi 执行这次操作吗？",
+    message: isMemoryDraft ? "允许 Magi 创建这条待确认记忆草稿吗？" : "允许 Magi 执行这次操作吗？",
     detail,
     buttons: [isMemoryDraft ? "允许创建草稿" : "允许一次", "拒绝"],
     defaultId: 1,

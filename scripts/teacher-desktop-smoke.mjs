@@ -80,11 +80,13 @@ try {
   await mkdir(path.join(folderFixture, "教材", "章节"), { recursive: true });
   await writeFile(path.join(folderFixture, "教材", "章节", "牛顿定律.md"), "# 牛顿定律");
   await writeFile(path.join(folderFixture, "教材", "忽略.tmp"), "ignored");
+  await writeFile(path.join(folderFixture, "教材", "~$课程标准.docx"), "temporary");
   await writeFile(path.join(folderFixture, ".hidden.csv"), "hidden");
   const folderSelection = await collectTeachingMaterialFiles([folderFixture], "folder");
   assert.equal(folderSelection.files.length, 1);
   assert.match(folderSelection.files[0].importPath, /folder-fixture\/教材\/章节\/牛顿定律\.md/);
   assert.equal(folderSelection.skippedUnsupported, 1);
+  assert.equal(folderSelection.skippedTemporary, 1);
 
   electronApp = await electron.launch({
     args: [
@@ -290,10 +292,7 @@ try {
     .locator("#composer-input")
     .fill(`${rejectedApprovalPrompt}：请创建一条待教师确认的项目记忆草稿。`);
   await page.locator("#send-button").click();
-  await page
-    .locator(".message.assistant")
-    .filter({ hasText: "教师已拒绝创建记忆草稿" })
-    .waitFor();
+  await page.locator(".message.assistant").filter({ hasText: "教师已拒绝创建记忆草稿" }).waitFor();
   assert.equal(providerRequests.length, requestsBeforeRejection + 3);
   const rejectedDrafts = await getProjectMemoryState(page);
   assert.equal(
@@ -319,10 +318,7 @@ try {
     .locator("#composer-input")
     .fill(`${approvedApprovalPrompt}：请创建一条待教师确认的项目记忆草稿。`);
   await page.locator("#send-button").click();
-  await page
-    .locator(".message.assistant")
-    .filter({ hasText: "记忆草稿已等待教师确认" })
-    .waitFor();
+  await page.locator(".message.assistant").filter({ hasText: "记忆草稿已等待教师确认" }).waitFor();
   assert.equal(providerRequests.length, requestsBeforeApproval + 3);
   const approvedStateBeforeReview = await getProjectMemoryState(page);
   assert.ok(
@@ -337,9 +333,7 @@ try {
   );
   const approvalDialogs = await electronApp.evaluate(() => globalThis.__magiApprovalDialogs);
   assert.equal(approvalDialogs.length, 1);
-  const approvedDraftCard = page
-    .locator(".memory-card")
-    .filter({ hasText: approvedDraftContent });
+  const approvedDraftCard = page.locator(".memory-card").filter({ hasText: approvedDraftContent });
   await approvedDraftCard.waitFor();
   await approvedDraftCard.locator(".approve").click();
   await approvedDraftCard.waitFor({ state: "detached" });
@@ -580,7 +574,7 @@ function latestUserMessageText(body) {
   if (!message) return "";
   if (typeof message.content === "string") return message.content;
   return (message.content ?? [])
-    .map((part) => (typeof part === "string" ? part : part?.text ?? ""))
+    .map((part) => (typeof part === "string" ? part : (part?.text ?? "")))
     .join("\n");
 }
 

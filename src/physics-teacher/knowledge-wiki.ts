@@ -25,6 +25,11 @@ interface WikiCategoryDefinition {
 
 const CATEGORIES: WikiCategoryDefinition[] = [
   { id: "curriculum-textbooks", label: "课标与教材", description: "课程标准、教材和章节资料" },
+  {
+    id: "assessment-reports",
+    label: "年报与质量分析",
+    description: "考试年报、质量分析、试题分析和教学建议"
+  },
   { id: "exams-answers", label: "试卷与答案", description: "考试、试卷、答案和题目解析" },
   { id: "student-learning", label: "成绩与学情", description: "成绩、答题明细、错题和复测数据" },
   { id: "lesson-plans", label: "教案与课件", description: "教案、教学设计、备课和课堂课件" },
@@ -164,16 +169,23 @@ function categoryFor(resource: TeachingResource): WikiCategoryDefinition {
   if (/(成绩|得分|学生|答题明细|错题|学情|复测|correct.?rate|score)/i.test(value)) {
     return category("student-learning");
   }
-  if (/(课标|课程标准|教材|教科书|必修|选修|textbook|curriculum)/i.test(value)) {
+  if (/(课标|课程标准|教材|教科书|负面清单|超标|必修|选修|textbook|curriculum)/i.test(value)) {
     return category("curriculum-textbooks");
   }
-  if (/(教案|教学设计|备课|课件|课堂|lesson|slides?)/i.test(value)) {
+  if (/(年报|质量分析|分析报告|试题分析|教学建议)/i.test(value)) {
+    return category("assessment-reports");
+  }
+  if (/(教案|教学设计|备课|课件|课堂|复习|备考|lesson|slides?)/i.test(value)) {
     return category("lesson-plans");
   }
-  if (/(作业|练习|习题|导学案|homework|exercise|practice)/i.test(value)) {
+  if (/(作业|练习|习题|训练|导学案|homework|exercise|practice)/i.test(value)) {
     return category("exercises");
   }
-  if (/(试卷|考试|期中|期末|月考|模拟|答案|解析|题目|exam|answer)/i.test(value)) {
+  if (
+    /(试卷|考试|中考|真题|题库|期中|期末|月考|模拟|答案|解析|题目|答题卡|学业评价|exam|answer)/i.test(
+      value
+    )
+  ) {
     return category("exams-answers");
   }
   return category("other");

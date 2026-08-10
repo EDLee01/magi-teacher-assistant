@@ -41,6 +41,7 @@
     "test:teacher-live-paper": "npm run build && electron scripts/teacher-live-followup-paper-bootstrap.cjs",
     "test:teacher-live-paper:recheck": "npm run build && electron scripts/teacher-live-followup-paper-recheck.mjs",
     "test:teacher-paper-rubric": "npm run build && electron scripts/teacher-paper-business-rubric-smoke.mjs",
+    "test:teacher-live-wiki": "npm run build && electron scripts/teacher-live-folder-wiki-bootstrap.cjs",
     "test:teacher-live-lesson": "npm run build && electron scripts/teacher-live-followup-lesson-bootstrap.cjs",
     "test:teacher-live-homework": "npm run build && electron scripts/teacher-live-followup-homework-bootstrap.cjs",
     "test:teacher-live-homework:recheck": "npm run build && electron scripts/teacher-live-followup-homework-recheck-bootstrap.cjs",

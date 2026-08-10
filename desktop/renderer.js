@@ -796,7 +796,8 @@ async function uploadResources(mode = "files") {
       `新增 ${result.addedCount} 份资料`,
       result.duplicateCount ? `跳过 ${result.duplicateCount} 份重复文件` : null,
       result.skippedUnsupported ? `忽略 ${result.skippedUnsupported} 个不支持的文件` : null,
-      result.skippedOversized ? `忽略 ${result.skippedOversized} 个超大文件` : null
+      result.skippedOversized ? `忽略 ${result.skippedOversized} 个超大文件` : null,
+      result.skippedTemporary ? `忽略 ${result.skippedTemporary} 个 Office 临时文件` : null
     ].filter(Boolean);
     showToast(`${notes.join("，")}；知识库已更新`);
   } catch (error) {

@@ -78,6 +78,9 @@ export class TeachingResourceGateway {
     }
 
     const originalFilename = safeDisplayFilename(input.filename);
+    if (isTemporaryTeachingResourceFilename(originalFilename)) {
+      throw new Error("Office 临时文件不能作为教学资料上传");
+    }
     const extension = safeExtension(originalFilename);
     const checksumSha256 = createHash("sha256").update(input.body).digest("hex");
     const existing = this.store.findResourceByChecksum(input.projectId, checksumSha256);
@@ -119,6 +122,36 @@ export class TeachingResourceGateway {
       }
       throw error;
     }
+  }
+
+  refreshStoredOfficeText(projectId: string): number {
+    let updated = 0;
+    for (const resource of this.store.listResources(projectId)) {
+      if (
+        resource.excerpt ||
+        !resource.storagePath ||
+        isTemporaryTeachingResourceFilename(resource.title)
+      ) {
+        continue;
+      }
+      const extension = path.extname(resource.title).toLowerCase();
+      if (extension !== ".pptx" && extension !== ".xlsx") continue;
+      const excerpt = extractTextExcerpt(
+        Buffer.alloc(0),
+        extension,
+        resource.mimeType,
+        resource.storagePath,
+        this.env
+      );
+      if (!excerpt) continue;
+      this.store.updateResourceSearchText({
+        resourceId: resource.id,
+        excerpt,
+        metadata: { ...resource.metadata, wikiTextStatus: "ready" }
+      });
+      updated += 1;
+    }
+    return updated;
   }
 
   async search(input: {
@@ -307,8 +340,12 @@ function rankLocalResources(input: {
   query: string;
   limit: number;
 }): TeachingResource[] {
-  const exactIds = new Set(input.exact.map((resource) => resource.id));
-  const ranked = input.all
+  const exact = input.exact.filter(
+    (resource) => !isTemporaryTeachingResourceFilename(resource.title)
+  );
+  const all = input.all.filter((resource) => !isTemporaryTeachingResourceFilename(resource.title));
+  const exactIds = new Set(exact.map((resource) => resource.id));
+  const ranked = all
     .filter((resource) => !exactIds.has(resource.id))
     .map((resource) => ({ resource, score: localResourceScore(resource, input.query) }))
     // A single shared Chinese bigram (for example “一定”) is too weak and
@@ -319,14 +356,16 @@ function rankLocalResources(input: {
         right.score - left.score || right.resource.createdAt.localeCompare(left.resource.createdAt)
     )
     .map((item) => item.resource);
-  const selected = [...input.exact, ...ranked].slice(0, input.limit);
+  const selected = [...exact, ...ranked].slice(0, input.limit);
   if (selected.length > 0) return selected;
   // A teacher often says “根据我上传的资料” without repeating a filename.
   // Keep a small recent-project fallback only for that explicit intent; unrelated
   // searches should not be polluted by every recent upload.
-  return shouldUseRecentResourceFallback(input.query)
-    ? input.all.slice(0, Math.min(input.limit, 6))
-    : [];
+  return shouldUseRecentResourceFallback(input.query) ? all.slice(0, Math.min(input.limit, 6)) : [];
+}
+
+export function isTemporaryTeachingResourceFilename(filename: string): boolean {
+  return path.basename(filename).startsWith("~$");
 }
 
 function localResourceScore(resource: TeachingResource, query: string): number {
@@ -413,6 +452,12 @@ function extractTextExcerpt(
       storagePath
     ]);
   }
+  if (extension === ".pptx") {
+    return extractOfficeOpenXmlText(storagePath, "presentation");
+  }
+  if (extension === ".xlsx") {
+    return extractOfficeOpenXmlText(storagePath, "spreadsheet");
+  }
   if (extension === ".pdf") {
     const configured = env.MAGI_PDFTOTEXT_PATH?.trim();
     const candidates = [
@@ -444,6 +489,78 @@ function extractTextExcerpt(
     }
   }
   return undefined;
+}
+
+function extractOfficeOpenXmlText(
+  storagePath: string,
+  kind: "presentation" | "spreadsheet"
+): string | undefined {
+  const entriesResult = spawnSync("unzip", ["-Z1", storagePath], {
+    encoding: "utf8",
+    timeout: 10_000,
+    maxBuffer: 2 * 1024 * 1024,
+    windowsHide: true
+  });
+  if (entriesResult.error || entriesResult.status !== 0 || !entriesResult.stdout) return undefined;
+  const entries = entriesResult.stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .filter((entry) =>
+      kind === "presentation"
+        ? /^ppt\/slides\/slide\d+\.xml$/i.test(entry)
+        : entry === "xl/sharedStrings.xml" ||
+          entry === "xl/workbook.xml" ||
+          /^xl\/worksheets\/sheet\d+\.xml$/i.test(entry)
+    )
+    .sort(naturalOfficeEntryOrder)
+    .slice(0, 200);
+  if (entries.length === 0) return undefined;
+  const contentResult = spawnSync("unzip", ["-p", storagePath, ...entries], {
+    encoding: "utf8",
+    timeout: 20_000,
+    maxBuffer: 16 * 1024 * 1024,
+    windowsHide: true
+  });
+  if (!contentResult.stdout) return undefined;
+  const values = extractOfficeXmlValues(contentResult.stdout, kind);
+  return normalizeExtractedText(values.join("\n"));
+}
+
+function naturalOfficeEntryOrder(left: string, right: string): number {
+  return left.localeCompare(right, "en", { numeric: true });
+}
+
+function extractOfficeXmlValues(xml: string, kind: "presentation" | "spreadsheet"): string[] {
+  const values: string[] = [];
+  const tags = kind === "presentation" ? ["t"] : ["t", "v", "f"];
+  for (const tag of tags) {
+    const pattern = new RegExp(
+      `<(?:(?:[A-Za-z_][\\w.-]*):)?${tag}\\b[^>]*>([\\s\\S]*?)<\\/(?:(?:[A-Za-z_][\\w.-]*):)?${tag}>`,
+      "gi"
+    );
+    for (const match of xml.matchAll(pattern)) {
+      const value = decodeXmlText(match[1].replace(/<[^>]+>/g, " ")).trim();
+      if (value) values.push(value);
+    }
+  }
+  if (kind === "spreadsheet") {
+    for (const match of xml.matchAll(/<sheet\b[^>]*\bname="([^"]+)"/gi)) {
+      const value = decodeXmlText(match[1]).trim();
+      if (value) values.push(`工作表：${value}`);
+    }
+  }
+  return values;
+}
+
+function decodeXmlText(value: string): string {
+  return value
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(Number.parseInt(code, 16)))
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number.parseInt(code, 10)))
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
 }
 
 function runTextExtractor(command: string, args: string[]): string | undefined {

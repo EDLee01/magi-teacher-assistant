@@ -849,6 +849,105 @@ describe("Magi 教师助手 backend", () => {
     expect(categoryPage).toContain("高二资料/考试/期中答题明细.csv");
   });
 
+  it("extracts searchable Wiki text from PPTX and XLSX teaching materials", async () => {
+    const { service } = setup();
+    const project = service.createProject({
+      name: "九年级资料库",
+      grade: "九年级",
+      className: "2班"
+    });
+    const presentation = service.uploadResource({
+      projectId: project.id,
+      filename: "2022版课程标准解读.pptx",
+      body: createStoredZip([
+        {
+          name: "ppt/slides/slide1.xml",
+          content: `<p:sld xmlns:p="p" xmlns:a="a"><a:t>${"义务教育物理课程标准核心素养与科学探究".repeat(40)}</a:t></p:sld>`
+        }
+      ]),
+      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      metadata: { importPath: "教学资料/课程标准/2022版课程标准解读.pptx" }
+    });
+    const spreadsheet = service.uploadResource({
+      projectId: project.id,
+      filename: "期中逐题得分.xlsx",
+      body: createStoredZip([
+        {
+          name: "xl/sharedStrings.xml",
+          content: "<sst><si><t>九年级2班</t></si><si><t>滑动摩擦力</t></si></sst>"
+        },
+        {
+          name: "xl/workbook.xml",
+          content: '<workbook><sheets><sheet name="逐题得分"/></sheets></workbook>'
+        },
+        {
+          name: "xl/worksheets/sheet1.xml",
+          content:
+            '<worksheet><sheetData><row><c t="s"><v>0</v></c><c t="s"><v>1</v></c><c><v>0.58</v></c></row></sheetData></worksheet>'
+        }
+      ]),
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      metadata: { importPath: "教学资料/成绩/期中逐题得分.xlsx" }
+    });
+    service.uploadResource({
+      projectId: project.id,
+      filename: "2025年中考物理年报.md",
+      body: Buffer.from("# 2025年中考物理年报\n试题分析与教学建议"),
+      mimeType: "text/markdown",
+      metadata: { importPath: "教学资料/年报/2025年中考物理年报.md" }
+    });
+
+    expect(presentation.excerpt).toContain("核心素养与科学探究");
+    expect(spreadsheet.excerpt).toContain("滑动摩擦力");
+    expect(spreadsheet.excerpt).toContain("工作表：逐题得分");
+    expect(presentation.metadata.wikiTextStatus).toBe("ready");
+    expect(spreadsheet.metadata.wikiTextStatus).toBe("ready");
+    expect(service.getKnowledgeWiki(project.id).categories).toContainEqual(
+      expect.objectContaining({ id: "assessment-reports", label: "年报与质量分析", count: 1 })
+    );
+    await expect(
+      service.searchResources({ projectId: project.id, query: "核心素养 科学探究" })
+    ).resolves.toMatchObject({ items: [expect.objectContaining({ id: presentation.id })] });
+    await expect(
+      service.searchResources({ projectId: project.id, query: "滑动摩擦力 逐题得分" })
+    ).resolves.toMatchObject({ items: [expect.objectContaining({ id: spreadsheet.id })] });
+    expect(
+      readFileSync(`${project.rootDir}/workspace/wiki/sources/${spreadsheet.id}.md`, "utf8")
+    ).toContain("滑动摩擦力");
+
+    const legacyBody = createStoredZip([
+      {
+        name: "xl/sharedStrings.xml",
+        content: "<sst><si><t>浮力实验复测</t></si></sst>"
+      }
+    ]);
+    const legacyStoragePath = `${project.rootDir}/uploads/legacy-results.xlsx`;
+    writeFileSync(legacyStoragePath, legacyBody);
+    const legacy = projectStore!.addResource({
+      projectId: project.id,
+      sourceId: spreadsheet.sourceId,
+      title: "历史复测成绩.xlsx",
+      kind: "exam-results",
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      originalFilename: "历史复测成绩.xlsx",
+      storagePath: legacyStoragePath,
+      sizeBytes: legacyBody.length,
+      metadata: { wikiTextStatus: "source-only" }
+    });
+    expect(legacy.excerpt).toBeUndefined();
+    service.getKnowledgeWiki(project.id);
+    expect(
+      service.listResources(project.id).find((item) => item.id === legacy.id)?.excerpt
+    ).toContain("浮力实验复测");
+    expect(() =>
+      service.uploadResource({
+        projectId: project.id,
+        filename: "~$课程标准解读.pptx",
+        body: Buffer.from("temporary")
+      })
+    ).toThrow("Office 临时文件");
+  });
+
   it("runs a session with project-scoped memory and retrieved teaching evidence", async () => {
     let captured: Parameters<typeof runHeadlessPrompt>[0] | undefined;
     const promptRunner: typeof runHeadlessPrompt = async (input) => {
@@ -1228,4 +1327,54 @@ function permission(
     mode: "dontAsk",
     rules
   }).decision;
+}
+
+function createStoredZip(entries: Array<{ name: string; content: string }>): Buffer {
+  const localParts: Buffer[] = [];
+  const centralParts: Buffer[] = [];
+  let localOffset = 0;
+  for (const entry of entries) {
+    const name = Buffer.from(entry.name, "utf8");
+    const data = Buffer.from(entry.content, "utf8");
+    const checksum = crc32(data);
+    const localHeader = Buffer.alloc(30);
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt32LE(checksum, 14);
+    localHeader.writeUInt32LE(data.length, 18);
+    localHeader.writeUInt32LE(data.length, 22);
+    localHeader.writeUInt16LE(name.length, 26);
+    localParts.push(localHeader, name, data);
+
+    const centralHeader = Buffer.alloc(46);
+    centralHeader.writeUInt32LE(0x02014b50, 0);
+    centralHeader.writeUInt16LE(20, 4);
+    centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt32LE(checksum, 16);
+    centralHeader.writeUInt32LE(data.length, 20);
+    centralHeader.writeUInt32LE(data.length, 24);
+    centralHeader.writeUInt16LE(name.length, 28);
+    centralHeader.writeUInt32LE(localOffset, 42);
+    centralParts.push(centralHeader, name);
+    localOffset += localHeader.length + name.length + data.length;
+  }
+  const centralDirectory = Buffer.concat(centralParts);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(centralDirectory.length, 12);
+  end.writeUInt32LE(localOffset, 16);
+  return Buffer.concat([...localParts, centralDirectory, end]);
+}
+
+function crc32(value: Buffer): number {
+  let result = 0xffffffff;
+  for (const byte of value) {
+    result ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      result = (result >>> 1) ^ (result & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (result ^ 0xffffffff) >>> 0;
 }

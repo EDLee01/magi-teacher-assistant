@@ -46,7 +46,7 @@ import {
   PhysicsQuestionCandidate,
   renderPhysicsQuestionCandidatePack
 } from "./question-bank-candidates.js";
-import { TeachingResourceGateway } from "./resources.js";
+import { isTemporaryTeachingResourceFilename, TeachingResourceGateway } from "./resources.js";
 import {
   physicsTeacherSkillInstructions,
   PhysicsTeacherSkill,
@@ -373,7 +373,9 @@ export class PhysicsTeacherService {
 
   listResources(projectId: string): TeachingResource[] {
     this.getProject(projectId);
-    return this.options.projectStore.listResources(projectId);
+    return this.options.projectStore
+      .listResources(projectId)
+      .filter((resource) => !isTemporaryTeachingResourceFilename(resource.title));
   }
 
   uploadResource(input: {
@@ -430,9 +432,10 @@ export class PhysicsTeacherService {
 
   private refreshKnowledgeWiki(projectId: string): PhysicsTeacherKnowledgeWikiSummary {
     const projectPaths = this.projectPathsForExisting(projectId);
+    this.resources.refreshStoredOfficeText(projectId);
     return rebuildPhysicsTeacherKnowledgeWiki({
       projectPaths,
-      resources: this.options.projectStore.listResources(projectId)
+      resources: this.listResources(projectId)
     });
   }
 
@@ -443,6 +446,7 @@ export class PhysicsTeacherService {
     filters?: Record<string, unknown>;
   }): Promise<TeachingResourceSearchResult> {
     this.getProject(input.projectId);
+    this.resources.refreshStoredOfficeText(input.projectId);
     return this.resources.search(input);
   }
 

@@ -27,8 +27,13 @@ export async function collectTeachingMaterialFiles(selectedPaths, mode) {
   const files = [];
   let skippedUnsupported = 0;
   let skippedOversized = 0;
+  let skippedTemporary = 0;
 
   async function visit(candidate, importPath) {
+    if (isTemporaryTeachingMaterial(path.basename(candidate))) {
+      skippedTemporary += 1;
+      return;
+    }
     const info = await stat(candidate);
     if (info.isDirectory()) {
       const entries = await readdir(candidate, { withFileTypes: true });
@@ -64,5 +69,9 @@ export async function collectTeachingMaterialFiles(selectedPaths, mode) {
   }
   const totalBytes = files.reduce((sum, file) => sum + file.sizeBytes, 0);
   if (totalBytes > MAX_TOTAL_BYTES) throw new Error("单次导入资料总大小不能超过 2 GB");
-  return { files, skippedUnsupported, skippedOversized, totalBytes };
+  return { files, skippedUnsupported, skippedOversized, skippedTemporary, totalBytes };
+}
+
+function isTemporaryTeachingMaterial(filename) {
+  return filename.startsWith("~$");
 }
