@@ -131,9 +131,11 @@ describe("Magi 教师助手 backend", () => {
     const questionSkillPath = `${runtime.magiPaths.skillsRoot}/physics-question-design/SKILL.md`;
     const lessonSkillPath = `${runtime.magiPaths.skillsRoot}/physics-lesson-planning/SKILL.md`;
     const homeworkSkillPath = `${runtime.magiPaths.skillsRoot}/physics-homework-guidance/SKILL.md`;
+    const personalizedSkillPath = `${runtime.magiPaths.skillsRoot}/physics-personalized-learning/SKILL.md`;
     expect(existsSync(questionSkillPath)).toBe(true);
     expect(existsSync(lessonSkillPath)).toBe(true);
     expect(existsSync(homeworkSkillPath)).toBe(true);
+    expect(existsSync(personalizedSkillPath)).toBe(true);
     runtime.close();
     writeFileSync(
       questionSkillPath,
@@ -150,6 +152,11 @@ describe("Magi 教师助手 backend", () => {
       "---\nname: physics-homework-guidance\n---\n# 物理作业辅导与调整\n3. 给学生辅导时先问关键判断或给一级提示，再逐级增加提示；不要一开始直接抄出完整答案。\n",
       "utf8"
     );
+    writeFileSync(
+      personalizedSkillPath,
+      "---\nname: physics-personalized-learning\n---\n# 物理个性化学习\n2. 按“当前会什么—卡在哪里—下一小步—怎样证明学会”描述学生需要，避免贴固定能力标签。\n",
+      "utf8"
+    );
     runtime = createPhysicsTeacherRuntime(temp.env);
     expect(readFileSync(questionSkillPath, "utf8")).toContain("原题优先原则");
     expect(readFileSync(questionSkillPath, "utf8")).toContain("render_teacher_document.py");
@@ -157,6 +164,10 @@ describe("Magi 教师助手 backend", () => {
     expect(readFileSync(lessonSkillPath, "utf8")).toContain("所有“用时”相加");
     expect(readFileSync(homeworkSkillPath, "utf8")).toContain("HOMEWORK_GUIDANCE_BUSINESS_MARKER");
     expect(readFileSync(homeworkSkillPath, "utf8")).toContain("通过、部分通过、未通过");
+    expect(readFileSync(personalizedSkillPath, "utf8")).toContain(
+      "PERSONALIZED_LEARNING_BUSINESS_MARKER"
+    );
+    expect(readFileSync(personalizedSkillPath, "utf8")).toContain("7 天学习路径表");
     runtime.close();
     const customLessonSkill =
       "---\nname: physics-lesson-planning\n---\n# 物理教师备课\n这是教师自行维护的备课流程。\n";
@@ -399,6 +410,48 @@ describe("Magi 教师助手 backend", () => {
       .messages.find((message) => message.metadata.source === "physics-teacher-context")!.content;
     expect(context).toContain("第1题8/10，第2题4/10，第3题6/10");
     expect(context).toContain("数据事实必须逐项保留");
+  });
+
+  it("implicitly loads evidence-based personalized learning with original questions and files", async () => {
+    let captured: Parameters<typeof runHeadlessPrompt>[0] | undefined;
+    const promptRunner: typeof runHeadlessPrompt = async (input) => {
+      captured = input;
+      return {
+        sessionId: input.sessionId!,
+        jobId: "personalized-learning-skill-test",
+        status: "completed",
+        message: "三名匿名学生的一周学习路径已生成"
+      };
+    };
+    const { service } = setup({}, undefined, promptRunner);
+    const project = service.createProject({
+      name: "初二物理",
+      grade: "初二",
+      className: "1班"
+    });
+    const session = service.createSession({
+      projectId: project.id,
+      title: "匿名学生学习路径",
+      kind: "practice-adjustment"
+    });
+
+    await service.sendMessage({
+      sessionId: session.sessionId,
+      prompt: "根据S01、S02、S03的作答证据制定7天个性化学习路径，并从题库筛选原题"
+    });
+
+    const context = sessionStore!
+      .getSession(session.sessionId)!
+      .messages.find((message) => message.role === "system")!.content;
+    expect(context).toContain("Skill：physics-personalized-learning");
+    expect(context).toContain("PERSONALIZED_LEARNING_BUSINESS_MARKER");
+    expect(context).toContain("Skill：physics-question-design");
+    expect(context).toContain("一次作答、缺交或缺测不能升级为稳定能力结论");
+    expect(context).toContain("每天总量要适合正常教学节奏");
+    expect(context).toContain("未经教师确认不得写入长期项目记忆");
+    expect(context).toContain("[DOCX/PDF 交付方式]");
+    expect(context).toContain("只报告匿名对象数量、计划周期、原题占比");
+    expect(captured?.prompt).toContain("7天个性化学习路径");
   });
 
   it("isolates projects while sharing Magi memory across sessions in one project", () => {

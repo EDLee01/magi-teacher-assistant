@@ -41,6 +41,8 @@
     "test:teacher-live-lesson": "npm run build && electron scripts/teacher-live-followup-lesson-bootstrap.cjs",
     "test:teacher-live-homework": "npm run build && electron scripts/teacher-live-followup-homework-bootstrap.cjs",
     "test:teacher-live-homework:recheck": "npm run build && electron scripts/teacher-live-followup-homework-recheck-bootstrap.cjs",
+    "test:teacher-live-personalized": "npm run build && electron scripts/teacher-live-followup-personalized-bootstrap.cjs",
+    "test:teacher-live-personalized:recheck": "npm run build && electron scripts/teacher-live-followup-personalized-recheck-bootstrap.cjs",
     "teacher:desktop": "npm run build && electron desktop/main.mjs",
     "teacher:serve": "npm run build && node dist/physics-teacher/cli.js",
     "test:ssh-localhost": "npm run build && node scripts/ssh-localhost-smoke.mjs",

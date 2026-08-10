@@ -592,7 +592,8 @@ function buildTeacherContext(
     (skill) =>
       skill.name === "physics-question-design" ||
       skill.name === "physics-lesson-planning" ||
-      skill.name === "physics-homework-guidance"
+      skill.name === "physics-homework-guidance" ||
+      skill.name === "physics-personalized-learning"
   )
     ? [
         "",
@@ -600,11 +601,13 @@ function buildTeacherContext(
         `项目已安装受控渲染器：${PHYSICS_TEACHER_DOCUMENT_RENDERER_RELATIVE_PATH}。不要自行拼装 DOCX/PDF 二进制文件。`,
         "先用一次 FileWrite 把完整成果写成 artifacts/<文件名>.md，再运行：",
         `python3 ${PHYSICS_TEACHER_DOCUMENT_RENDERER_RELATIVE_PATH} --input artifacts/<文件名>.md --docx artifacts/<文件名>.docx --pdf artifacts/<文件名>.pdf`,
-        businessSkills.some((skill) => skill.name === "physics-question-design")
-          ? "渲染成功后在聊天中只报告题型数量、原题占比以及 DOCX/PDF 文件名。"
-          : businessSkills.some((skill) => skill.name === "physics-lesson-planning")
-            ? "渲染成功后在聊天中只报告课题、总时长以及 DOCX/PDF 文件名，不要把完整教案粘贴进聊天。"
-            : "渲染成功后在聊天中只报告分层结构、题量以及 DOCX/PDF 文件名，不要把完整作业粘贴进聊天。"
+        businessSkills.some((skill) => skill.name === "physics-personalized-learning")
+          ? "渲染成功后在聊天中只报告匿名对象数量、计划周期、原题占比以及 DOCX/PDF 文件名，不要粘贴完整学习路径。"
+          : businessSkills.some((skill) => skill.name === "physics-homework-guidance")
+            ? "渲染成功后在聊天中只报告分层结构、题量以及 DOCX/PDF 文件名，不要把完整作业粘贴进聊天。"
+            : businessSkills.some((skill) => skill.name === "physics-lesson-planning")
+              ? "渲染成功后在聊天中只报告课题、总时长以及 DOCX/PDF 文件名，不要把完整教案粘贴进聊天。"
+              : "渲染成功后在聊天中只报告题型数量、原题占比以及 DOCX/PDF 文件名。"
       ]
     : [];
   const followUpLines = followUp
