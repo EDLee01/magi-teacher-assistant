@@ -80,6 +80,7 @@ describe("tool registry", () => {
         "Config",
         "Skill",
         "SkillManage",
+        "MemoryDraft",
         "LearningDraft",
         "SessionSearch",
         "LSP"
@@ -117,6 +118,7 @@ describe("tool registry", () => {
         "Agent",
         "Browser",
         "Config",
+        "MemoryDraft",
         "LearningDraft",
         "GitBranchCreate",
         "LSP",

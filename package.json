@@ -43,6 +43,7 @@
     "test:teacher-live-homework:recheck": "npm run build && electron scripts/teacher-live-followup-homework-recheck-bootstrap.cjs",
     "test:teacher-live-personalized": "npm run build && electron scripts/teacher-live-followup-personalized-bootstrap.cjs",
     "test:teacher-live-personalized:recheck": "npm run build && electron scripts/teacher-live-followup-personalized-recheck-bootstrap.cjs",
+    "test:teacher-live-memory": "npm run build && electron scripts/teacher-live-cross-session-memory-bootstrap.cjs",
     "teacher:desktop": "npm run build && electron desktop/main.mjs",
     "teacher:serve": "npm run build && node dist/physics-teacher/cli.js",
     "test:ssh-localhost": "npm run build && node scripts/ssh-localhost-smoke.mjs",

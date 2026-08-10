@@ -30,6 +30,7 @@ export const PHYSICS_TEACHER_ON_DEMAND_TOOLS = [
   "GitShow",
   "GitBranchList",
   "GitStage",
+  "MemoryDraft",
   "SessionSearch",
   "SendUserMessage"
 ] as const;
@@ -52,7 +53,10 @@ export const PHYSICS_TEACHER_BLOCKED_TOOLS = [
   "GitHubIssueCreate",
   "GitHubPRCreate",
   "Config",
-  "SkillManage"
+  "SkillManage",
+  "Memorize",
+  "MemoryCorrect",
+  "LearningDraft"
 ] as const;
 
 export type PhysicsTeacherPermissionScope = "read-only" | "project-write" | "approval";
@@ -68,7 +72,8 @@ const SCOPED_ON_DEMAND_TOOLS = new Set([
   "FilePatch",
   "NotebookEdit",
   "Bash",
-  "GitStage"
+  "GitStage",
+  "MemoryDraft"
 ]);
 
 const SAFE_READ_ONLY_SHELL_COMMANDS = [
@@ -138,13 +143,14 @@ export function buildPhysicsTeacherToolRules(
     "NotebookEdit(*workspace/*)",
     "NotebookEdit(*artifacts/*)",
     "GitStage(*)",
+    "MemoryDraft",
     ...SAFE_PYTHON_COMMANDS
   ];
   return buildToolPermissionRules({
     allowedTools: [...sharedAllowedTools, ...(scope === "project-write" ? projectWriteTools : [])],
     askTools:
       scope === "approval"
-        ? ["FileWrite", "FileEdit", "FilePatch", "NotebookEdit", "Bash", "GitStage"]
+        ? ["FileWrite", "FileEdit", "FilePatch", "NotebookEdit", "Bash", "GitStage", "MemoryDraft"]
         : [],
     disallowedTools: [...PHYSICS_TEACHER_BLOCKED_TOOLS, ...BLOCKED_SHELL_PATTERNS]
   })!;

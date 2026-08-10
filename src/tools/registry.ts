@@ -221,6 +221,11 @@ import {
   LearningDraftToolInputSchema,
   parseLearningDraftToolInput
 } from "./learning-draft-tool.js";
+import {
+  executeMemoryDraftTool,
+  MemoryDraftToolInputSchema,
+  parseMemoryDraftToolInput
+} from "./memory-draft-tool.js";
 import { MemoryNodeStore, MemoryNodeType } from "../memory-node-store.js";
 import { correctMemory, formatMemoryCorrectionResult } from "../memory-correction.js";
 import { SessionStore } from "../session-store.js";
@@ -1786,6 +1791,24 @@ const BUILTIN_TOOLS: RegisteredTool[] = [
     isReadOnly: (input) => input.value === undefined,
     isDestructive: () => false,
     isConcurrencySafe: (input) => input.value === undefined
+  },
+  {
+    name: "MemoryDraft",
+    description:
+      "Create a pending project Memory draft for teacher review. This tool can only propose; it cannot approve, reject, or write formal Memory. Use it for stable evidence that should carry across Sessions, never for one-off errors, missing work, secrets, or fixed student labels.",
+    category: "memory",
+    tags: ["memory", "project", "draft", "review", "teacher", "session"],
+    inputSchema: MemoryDraftToolInputSchema,
+    call: (input, context) =>
+      executeMemoryDraftTool({
+        request: parseMemoryDraftToolInput(input),
+        appRoot: requireAppRoot(context, "MemoryDraft"),
+        memoryRoot: context.memoryRoot,
+        sourceSession: context.sessionId
+      }),
+    isReadOnly: () => false,
+    isDestructive: () => false,
+    isConcurrencySafe: () => false
   },
   {
     name: "Memorize",

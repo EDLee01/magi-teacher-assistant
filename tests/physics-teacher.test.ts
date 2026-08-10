@@ -902,11 +902,13 @@ describe("Magi 教师助手 backend", () => {
     expect(captured?.env?.MAGI_TOOL_LOAD).toBe("minimal");
     expect(captured?.env?.MAGI_BASH_TIMEOUT_MS).toBe("60000");
     expect(captured?.prompt).toBe("我下一节课先讲什么？");
-    expect(
-      sessionStore!
-        .getSession(session.sessionId)
-        ?.messages.find((message) => message.role === "system")?.content
-    ).toContain("第12题得分率较低");
+    const teacherContext = sessionStore!
+      .getSession(session.sessionId)
+      ?.messages.find((message) => message.role === "system")?.content;
+    expect(teacherContext).toContain("第12题得分率较低");
+    expect(teacherContext).toContain("[项目记忆与教师确认]");
+    expect(teacherContext).toContain("select:MemoryDraft");
+    expect(teacherContext).toContain("一次作答错误、一次缺交、一次缺测");
 
     service.setApprovalResolver(async () => true);
     await service.sendMessage({
@@ -933,9 +935,13 @@ describe("Magi 教师助手 backend", () => {
     expect(PHYSICS_TEACHER_ALWAYS_TOOLS).toContain("WebSearch");
     expect(PHYSICS_TEACHER_ALWAYS_TOOLS).toContain("Skill");
     expect(PHYSICS_TEACHER_ON_DEMAND_TOOLS).toContain("Bash");
+    expect(PHYSICS_TEACHER_ON_DEMAND_TOOLS).toContain("MemoryDraft");
     expect(visibleTools).toContain("FileWrite");
     expect(visibleTools).toContain("GitDiff");
     expect(visibleTools).toContain("WebBrowser");
+    expect(visibleTools).toContain("MemoryDraft");
+    expect(visibleTools).not.toContain("Memorize");
+    expect(visibleTools).not.toContain("LearningDraft");
     expect(visibleTools).not.toContain("GitReset");
     expect(visibleTools).not.toContain("SshExec");
     expect(visibleTools.length).toBeLessThan(30);
@@ -961,16 +967,51 @@ describe("Magi 教师助手 backend", () => {
       })
     ).toBe("deny");
     expect(permission(rules, "GitReset", {})).toBe("deny");
+    expect(
+      permission(rules, "MemoryDraft", {
+        category: "project",
+        content: "S01连续三次在摩擦力受力分析中漏写平衡关系。",
+        reason: "三次连续作答证据"
+      })
+    ).toBe("allow");
+    expect(permission(rules, "Memorize", {})).toBe("deny");
+
+    const memoryToolSearch = await executeRegisteredTool({
+      cwd: process.cwd(),
+      permissionMode: "dontAsk",
+      rules,
+      toolUse: {
+        type: "tool-use",
+        id: "teacher-memory-tool-search",
+        name: "ToolSearch",
+        input: { query: "把稳定学情保存为待教师确认的项目记忆草稿" }
+      }
+    });
+    expect(memoryToolSearch.content).toMatch(/1\. MemoryDraft/);
 
     const readOnlyRules = buildPhysicsTeacherToolRules("read-only");
     expect(permission(readOnlyRules, "FileWrite", { file_path: "artifacts/report.md" })).toBe(
       "deny"
     );
+    expect(
+      permission(readOnlyRules, "MemoryDraft", {
+        category: "project",
+        content: "候选",
+        reason: "连续证据"
+      })
+    ).toBe("deny");
     const approvalRules = buildPhysicsTeacherToolRules("approval");
     expect(permission(approvalRules, "FileWrite", { file_path: "artifacts/report.md" })).toBe(
       "ask"
     );
     expect(permission(approvalRules, "Bash", { command: "python3 analysis.py" })).toBe("ask");
+    expect(
+      permission(approvalRules, "MemoryDraft", {
+        category: "project",
+        content: "候选",
+        reason: "连续证据"
+      })
+    ).toBe("ask");
 
     const env = buildPhysicsTeacherRuntimeEnv(
       { MAGI_TEACHER_BASH_TIMEOUT_MS: "999999" },
@@ -981,6 +1022,41 @@ describe("Magi 教师助手 backend", () => {
 
     const { service } = setup();
     const project = service.createProject({ name: "权限测试", grade: "九年级", className: "1班" });
+    const memorySession = service.createSession({
+      projectId: project.id,
+      title: "记忆草稿测试",
+      kind: "exam-analysis"
+    });
+    const projectMemoryRoot = service.projectPathsForExisting(project.id).memory;
+    const proposedMemory = await executeRegisteredTool({
+      cwd: project.rootDir,
+      stateRoot: getMagiPaths(temp!.env).stateRoot,
+      memoryRoot: projectMemoryRoot,
+      sessionId: memorySession.sessionId,
+      permissionMode: "dontAsk",
+      rules,
+      toolUse: {
+        type: "tool-use",
+        id: "teacher-memory-draft",
+        name: "MemoryDraft",
+        input: {
+          category: "project",
+          content: "S01连续三次在摩擦力受力分析中漏写平衡关系。",
+          reason: "三次连续作答证据",
+          confidence: 0.9
+        }
+      }
+    });
+    expect(proposedMemory.isError).not.toBe(true);
+    expect(proposedMemory.content).toContain("Formal project memory is unchanged");
+    const pendingMemory = service
+      .listMemoryDrafts(project.id)
+      .find((draft) => draft.content.includes("S01连续三次"));
+    expect(pendingMemory).toEqual(expect.objectContaining({ status: "pending" }));
+    expect(service.readMemory(project.id, "projects/context.md")).not.toContain("S01连续三次");
+    service.applyMemoryDraft(project.id, pendingMemory!.id);
+    expect(service.readMemory(project.id, "projects/context.md")).toContain("S01连续三次");
+
     const directPath = `${project.rootDir}/artifacts/知识图谱.md`;
     const directWrite = await executeRegisteredTool({
       cwd: project.rootDir,

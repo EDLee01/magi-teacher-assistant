@@ -233,6 +233,22 @@ try {
   assert.match(JSON.stringify(providerRequests[0].body), /项目内读写/);
 
   assert.equal(await markdownMessage.getByRole("button", { name: /继续追问/ }).count(), 0);
+  const autoRefreshDraft = await page.evaluate(async () => {
+    const projects = await window.physicsTeacherDesktop.request({
+      method: "GET",
+      path: "/api/projects"
+    });
+    return window.physicsTeacherDesktop.request({
+      method: "POST",
+      path: `/api/projects/${projects.data.projects[0].id}/memory/drafts`,
+      json: {
+        category: "project",
+        content: "这条草稿应在下一次回答后自动刷新出来。",
+        reason: "验证对话后刷新记忆草稿"
+      }
+    });
+  });
+  assert.equal(autoRefreshDraft.status, 201);
   await page.locator("#composer-input").fill("继续追问：把刚才的回答压缩成两点");
   await page.locator("#send-button").click();
   await page.waitForFunction(
@@ -245,6 +261,14 @@ try {
   assert.match(JSON.stringify(providerRequests[1].body), /本次为追问/);
   assert.match(JSON.stringify(providerRequests[1].body), /把刚才的回答压缩成两点/);
   assert.match(JSON.stringify(providerRequests[1].body), /模型接口联调成功/);
+  await page.locator('.inspector-tab[data-tab="memory"]').click();
+  const refreshedDraftCard = page
+    .locator(".memory-card")
+    .filter({ hasText: "这条草稿应在下一次回答后自动刷新出来" });
+  await refreshedDraftCard.waitFor();
+  await refreshedDraftCard.locator(".reject").click();
+  await page.locator("#memory-draft-list").filter({ hasText: "当前没有待确认的记忆" }).waitFor();
+  await page.locator('.inspector-tab[data-tab="resources"]').click();
 
   await page.locator("#composer-input").fill("用于测试排队追问的当前任务");
   await page.locator("#send-button").click();
@@ -387,7 +411,7 @@ try {
     await page.screenshot({ path: process.env.MAGI_TEACHER_DESKTOP_SCREENSHOT, fullPage: true });
   }
   process.stdout.write(
-    "Desktop smoke passed: queued follow-up, interrupt, cleared one-turn attachments, inspector close, generated-file previews, uploaded-resource previews, folder scanning, project Wiki, model settings, resources, and memory review are connected.\n"
+    "Desktop smoke passed: queued follow-up, interrupt, cleared one-turn attachments, inspector close, generated-file previews, uploaded-resource previews, folder scanning, project Wiki, model settings, resources, and memory draft auto-refresh/review are connected.\n"
   );
 } catch (error) {
   if (page && !page.isClosed()) {

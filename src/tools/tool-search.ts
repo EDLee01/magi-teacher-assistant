@@ -640,6 +640,9 @@ const CHINESE_PHRASE_ALIASES: ReadonlyArray<readonly [string, readonly string[]]
   ["看看之前聊过什么", ["session", "history", "recall", "search", "previous"]],
   ["之前聊过什么", ["session", "history", "recall", "search", "previous"]],
   ["聊过什么", ["session", "history", "recall", "search"]],
+  ["待确认的项目记忆草稿", ["memory", "draft", "project", "review", "persist"]],
+  ["项目记忆草稿", ["memory", "draft", "project", "review", "persist"]],
+  ["记忆草稿", ["memory", "draft", "review", "persist"]],
   ["记住这个偏好", ["remember", "memory", "memorize", "preference", "persist"]],
   ["记住这个", ["remember", "memory", "memorize", "persist"]],
   ["以后记得", ["remember", "memory", "memorize", "persist"]],
@@ -994,11 +997,13 @@ const INTENT_PROFILES: ToolIntentProfile[] = [
       "write memory",
       "记住这个",
       "以后记得",
-      "保存偏好"
+      "保存偏好",
+      "记忆草稿",
+      "待确认的项目记忆"
     ],
     categories: ["memory"],
     tags: ["memory", "persist", "graph"],
-    toolBoosts: { Memorize: 260, LearningDraft: 90, SessionSearch: 45 }
+    toolBoosts: { Memorize: 260, MemoryDraft: 240, LearningDraft: 90, SessionSearch: 45 }
   },
   {
     name: "memory-correction",

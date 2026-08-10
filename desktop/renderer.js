@@ -468,6 +468,11 @@ async function sendCurrentMessage(promptOverride, queuedMessage) {
     } catch (error) {
       showToast(`交付文件列表刷新失败：${error.message}`, true);
     }
+    try {
+      await refreshMemory();
+    } catch (error) {
+      showToast(`项目记忆列表刷新失败：${error.message}`, true);
+    }
   } catch (error) {
     if (state.session?.id === sessionId) {
       state.session.messages = optimisticMessages;
@@ -832,6 +837,19 @@ async function searchResources(query) {
   }
 }
 
+async function refreshMemory() {
+  if (!state.project) return;
+  const projectId = state.project.id;
+  const [memoryResult, draftsResult] = await Promise.all([
+    api("GET", `/api/projects/${encodeURIComponent(projectId)}/memory`),
+    api("GET", `/api/projects/${encodeURIComponent(projectId)}/memory/drafts`)
+  ]);
+  if (state.project?.id !== projectId) return;
+  state.memoryFiles = memoryResult.files || [];
+  state.memoryDrafts = draftsResult.drafts || [];
+  renderMemory();
+}
+
 function renderMemory() {
   ui.memoryDraftList.replaceChildren();
   ui.memoryFileList.replaceChildren();
@@ -882,13 +900,7 @@ async function reviewDraft(draftId, action) {
       "POST",
       `/api/projects/${encodeURIComponent(state.project.id)}/memory/drafts/${encodeURIComponent(draftId)}/${action}`
     );
-    const [memoryResult, draftsResult] = await Promise.all([
-      api("GET", `/api/projects/${encodeURIComponent(state.project.id)}/memory`),
-      api("GET", `/api/projects/${encodeURIComponent(state.project.id)}/memory/drafts`)
-    ]);
-    state.memoryFiles = memoryResult.files || [];
-    state.memoryDrafts = draftsResult.drafts || [];
-    renderMemory();
+    await refreshMemory();
     showToast(action === "apply" ? "已写入项目记忆" : "已拒绝这条记忆");
   } catch (error) {
     showToast(error.message, true);
