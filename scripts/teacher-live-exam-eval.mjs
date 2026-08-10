@@ -7,6 +7,7 @@ import { app, safeStorage } from "electron";
 
 import { PHYSICS_TEACHER_OPENAI_KEY_ENV } from "../dist/physics-teacher/model-settings.js";
 import { createPhysicsTeacherRuntime } from "../dist/physics-teacher/runtime.js";
+import { buildPhysicsQuestionCandidatePack } from "../dist/physics-teacher/question-bank-candidates.js";
 import { evaluateTeacherExamBusinessResult } from "./teacher-exam-business-rubric.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -49,12 +50,17 @@ const prompt = [
   "严格列出得分率低于60%的题目；等于60%的题目不能列入。",
   "把数据事实、教学解释和尚待教师确认的内容分开。",
   "然后针对低于60%的知识点，从项目题库中各找至少1道题干完整、答案可核对且不依赖缺失图片的原题，保留来源文件名、地区/年份和原题号。",
+  "原题候选表每行必须同时写资料ID与原题号；题干只要出现‘如图/见图/图示’等图片引用，本轮就不得列为候选，不能解释为图片不重要。",
   "找不到可靠原题就明确说明，不得自编后冒充原题。",
   "本轮只在对话中给出分析和原题候选表，不需要写文件。"
 ].join("\n");
 
 let runtime;
 let resultMessage = "";
+let selectedProject;
+let selectedResourceCount;
+let createdSessionId;
+let allowedOriginalCandidateCount;
 const startedAt = new Date().toISOString();
 
 try {
@@ -88,6 +94,18 @@ try {
   if (!selected || selected.resourceCount === 0) {
     throw new Error("没有包含题库资料的教学项目可用于业务测试");
   }
+  selectedProject = selected.project.name;
+  selectedResourceCount = selected.resourceCount;
+  const resourceQuery = "滑动摩擦力 浮力 原题 真题 试卷 答案 解析";
+  const allowedOriginalCandidates = buildPhysicsQuestionCandidatePack({
+    resources: runtime.service.listResources(selected.project.id),
+    query: `${prompt}\n${resourceQuery}`,
+    limit: 36
+  });
+  if (allowedOriginalCandidates.length < 2) {
+    throw new Error("后端完整题候选包不足两题，无法验证两个薄弱知识点的原题筛选");
+  }
+  allowedOriginalCandidateCount = allowedOriginalCandidates.length;
 
   reportStage(`选择项目“${selected.project.name}”，题库资料 ${selected.resourceCount} 份`);
   const session = runtime.service.createSession({
@@ -95,6 +113,7 @@ try {
     title: `考试分析业务测试 · ${new Date().toLocaleString("zh-CN")}`,
     kind: "exam-analysis"
   });
+  createdSessionId = session.sessionId;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("考试分析业务测试超时"), timeoutMs);
   timer.unref?.();
@@ -104,7 +123,7 @@ try {
       sessionId: session.sessionId,
       prompt,
       modelAlias,
-      resourceQuery: "滑动摩擦力 浮力 原题 真题 试卷 答案 解析",
+      resourceQuery,
       permissionScope: "project-write",
       signal: controller.signal,
       attachments: [
@@ -130,13 +149,19 @@ try {
     clearTimeout(timer);
   }
 
-  const assertions = evaluateTeacherExamBusinessResult(resultMessage);
+  const assertions = evaluateTeacherExamBusinessResult(resultMessage, {
+    allowedOriginalCandidates,
+    scriptExecutionEvidence: hasSuccessfulExamScriptRun(
+      runtime.service.getSession(session.sessionId).session.messages
+    )
+  });
   await writeReport({
     status: "passed",
     startedAt,
     completedAt: new Date().toISOString(),
     project: selected.project.name,
     resourceCount: selected.resourceCount,
+    allowedOriginalCandidateCount: allowedOriginalCandidates.length,
     modelAlias,
     assertions,
     message: resultMessage
@@ -161,6 +186,10 @@ try {
     startedAt,
     completedAt: new Date().toISOString(),
     modelAlias,
+    project: selectedProject,
+    resourceCount: selectedResourceCount,
+    sessionId: createdSessionId,
+    allowedOriginalCandidateCount,
     error: error instanceof Error ? error.stack || error.message : String(error),
     message: resultMessage
   });
@@ -171,6 +200,19 @@ try {
 } finally {
   runtime?.close();
   app.exit(process.exitCode || 0);
+}
+
+function hasSuccessfulExamScriptRun(messages) {
+  return messages.some(
+    (message) =>
+      message.role === "tool" &&
+      message.metadata?.toolName === "Bash" &&
+      message.metadata?.isError !== true &&
+      /Command exited 0/.test(message.content) &&
+      /逐题得分率/.test(message.content) &&
+      /Q3[^\n]{0,100}50\.0%/.test(message.content) &&
+      /Q4[^\n]{0,100}58\.0%/.test(message.content)
+  );
 }
 
 async function writeReport(report) {

@@ -325,6 +325,7 @@ describe("Magi 教师助手 backend", () => {
     expect(context).toContain("[DOCX/PDF 交付方式]");
     expect(context).toContain("只报告课题、总时长以及 DOCX/PDF 文件名");
     expect(captured?.prompt).toContain("45分钟讲评课");
+    expect(captured?.env?.MAGI_TOOL_LOAD).toBe("full");
   });
 
   it("implicitly loads layered homework guidance and DOCX/PDF delivery", async () => {
@@ -925,6 +926,17 @@ describe("Magi 教师助手 backend", () => {
         .messages.filter((message) => message.role === "system")
         .at(-1)?.content
     ).toContain("操作前询问");
+
+    const generalSession = service.createSession({
+      projectId: project.id,
+      title: "普通咨询",
+      kind: "general"
+    });
+    await service.sendMessage({
+      sessionId: generalSession.sessionId,
+      prompt: "你好"
+    });
+    expect(captured?.env?.MAGI_TOOL_LOAD).toBe("minimal");
   });
 
   it("keeps useful Magi tools on demand while restricting writes and shell commands", async () => {

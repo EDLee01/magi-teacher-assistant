@@ -281,6 +281,9 @@ export class PhysicsTeacherService {
         }
       };
       const runtimeEnv = buildPhysicsTeacherRuntimeEnv(this.env, project.rootDir);
+      if (businessSkills.length > 0) {
+        runtimeEnv.MAGI_TOOL_LOAD = "full";
+      }
       return await this.promptRunner({
         prompt: appendTemporaryAttachmentManifest(prompt, preparedAttachments.items),
         cwd: project.rootDir,

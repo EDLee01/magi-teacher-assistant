@@ -36,6 +36,7 @@
     "test:teacher-desktop": "npm run build && node scripts/teacher-desktop-smoke.mjs",
     "test:teacher-skill": "npm run build && node scripts/teacher-skill-business-smoke.mjs",
     "test:teacher-live-exam": "npm run build && electron scripts/teacher-live-exam-bootstrap.cjs",
+    "test:teacher-live-exam:recheck": "npm run build && node scripts/teacher-live-exam-recheck.mjs",
     "test:teacher-exam-rubric": "node scripts/teacher-exam-business-rubric-smoke.mjs",
     "test:teacher-live-paper": "npm run build && electron scripts/teacher-live-followup-paper-bootstrap.cjs",
     "test:teacher-live-lesson": "npm run build && electron scripts/teacher-live-followup-lesson-bootstrap.cjs",
