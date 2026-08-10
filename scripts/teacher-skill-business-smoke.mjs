@@ -15,52 +15,26 @@ const provider = http.createServer(async (request, response) => {
   for await (const chunk of request) chunks.push(Buffer.from(chunk));
   const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
   requests.push(body);
-  const toolResult = body.messages.find(
-    (message) => message.role === "tool" && message.tool_call_id === "implicit-exam-skill"
-  );
+  const context = JSON.stringify(body.messages);
+  assert.match(context, /EXAM_ANALYSIS_BUSINESS_MARKER/);
+  assert.match(context, /QUESTION_DESIGN_BUSINESS_MARKER/);
+  assert.match(context, /期中答题明细\.csv/);
+  assert.match(context, /期中试卷\.txt/);
+  assert.match(context, /参考答案\.txt/);
 
   response.writeHead(200, { "content-type": "application/json" });
-  if (!toolResult) {
-    response.end(
-      JSON.stringify({
-        choices: [
-          {
-            message: {
-              role: "assistant",
-              content: null,
-              tool_calls: [
-                {
-                  id: "implicit-exam-skill",
-                  type: "function",
-                  function: {
-                    name: "Skill",
-                    arguments: JSON.stringify({ skill: "physics-exam-analysis" })
-                  }
-                }
-              ]
-            },
-            finish_reason: "tool_calls"
-          }
-        ],
-        usage: { prompt_tokens: 20, completion_tokens: 6 }
-      })
-    );
-    return;
-  }
-
-  assert.match(toolResult.content, /EXAM_ANALYSIS_BUSINESS_MARKER/);
   response.end(
     JSON.stringify({
       choices: [
         {
           message: {
             role: "assistant",
-            content: "已按考试分析流程完成字段检查。SKILL_IMPLICIT_OK"
+            content: "已同时加载考试分析和原题筛选流程。COMBINED_SKILLS_PRELOADED_OK"
           },
           finish_reason: "stop"
         }
       ],
-      usage: { prompt_tokens: 30, completion_tokens: 8 }
+      usage: { prompt_tokens: 40, completion_tokens: 8 }
     })
   );
 });
@@ -84,11 +58,7 @@ let runtime;
 
 try {
   runtime = createPhysicsTeacherRuntime(env);
-  const skillFile = path.join(
-    runtime.magiPaths.skillsRoot,
-    "physics-exam-analysis",
-    "SKILL.md"
-  );
+  const skillFile = path.join(runtime.magiPaths.skillsRoot, "physics-exam-analysis", "SKILL.md");
   await assert.doesNotReject(() => access(skillFile));
 
   const config = loadConfig(runtime.magiPaths, env);
@@ -118,11 +88,29 @@ try {
     projectId: project.id,
     filename: "期中答题明细.csv",
     mimeType: "text/csv",
-    body: Buffer.from("student,question,score,max_score\n张同学,12,1,5\n李同学,12,2,5\n")
+    body: Buffer.from("student,question,score,max_score\nS01,12,1,5\nS02,12,2,5\n")
+  });
+  runtime.service.uploadResource({
+    projectId: project.id,
+    filename: "期中试卷.txt",
+    mimeType: "text/plain",
+    body: Buffer.from("第12题考查滑动摩擦力，第13题考查浮力。")
+  });
+  runtime.service.uploadResource({
+    projectId: project.id,
+    filename: "参考答案.txt",
+    mimeType: "text/plain",
+    body: Buffer.from("第12题：2N；第13题：增大。")
+  });
+  runtime.service.uploadResource({
+    projectId: project.id,
+    filename: "同知识点原题库.txt",
+    mimeType: "text/plain",
+    body: Buffer.from("2024广州一模第6题：滑动摩擦力；2023广州中考第7题：浮力。")
   });
 
   const prompt =
-    "我上传了期中考试答题明细。请先检查数据字段，再按题目得分率找出全班最需要补讲的知识点。";
+    "请检查期中考试答题明细，按逐题得分率完成考试分析，找出低于60%的知识点，再从题库检索相同知识点的原题作为训练。";
   assert.equal(prompt.includes("physics-exam-analysis"), false);
   assert.equal(prompt.toLowerCase().includes("skill"), false);
 
@@ -132,27 +120,26 @@ try {
     resourceQuery: "期中 答题 明细 得分率"
   });
 
-  assert.match(result.message, /SKILL_IMPLICIT_OK/);
-  assert.equal(requests.length, 2);
+  assert.match(result.message, /COMBINED_SKILLS_PRELOADED_OK/);
+  assert.equal(requests.length, 1);
   assert.ok(
     requests[0].tools.some((tool) => tool.function?.name === "Skill"),
     "Skill must be visible on the first teacher-model turn"
   );
   const firstContext = JSON.stringify(requests[0].messages);
-  assert.match(firstContext, /\[Available Skills\]/);
+  assert.match(firstContext, /\[本次已隐式采用的业务 Skill\]/);
   assert.match(firstContext, /physics-exam-analysis/);
+  assert.match(firstContext, /physics-question-design/);
+  assert.match(firstContext, /EXAM_ANALYSIS_BUSINESS_MARKER/);
+  assert.match(firstContext, /QUESTION_DESIGN_BUSINESS_MARKER/);
   assert.match(firstContext, /期中答题明细\.csv/);
-  assert.ok(
-    requests[1].messages.some(
-      (message) =>
-        message.role === "tool" &&
-        message.tool_call_id === "implicit-exam-skill" &&
-        message.content.includes("EXAM_ANALYSIS_BUSINESS_MARKER")
-    )
+  assert.equal(
+    requests[0].messages.some((message) => message.role === "tool"),
+    false
   );
 
   process.stdout.write(
-    "Teacher skill business smoke passed: a natural exam-analysis request implicitly loaded physics-exam-analysis before answering.\n"
+    "Teacher skill business smoke passed: a combined exam-analysis and original-question request preloaded both workflows before answering.\n"
   );
 } finally {
   runtime?.close();

@@ -34,7 +34,8 @@ description: 当教师上传物理考试成绩、逐题得分、答题明细或�
 2. 对表格先做字段、空值、重复记录、满分和人数核对。涉及统计时用 Python 脚本计算，不靠心算。
 3. 依次分析全卷概况、题目得分率/区分度、学生分组、典型作答和可能的错误观念。
 4. 把“数据事实”“教学解释”“尚待核实”分开写。不能从低得分率直接断言学生形成了某种错误观念。
-5. 给出下一节讲评课、后续作业和复测的具体安排，并让每一项建议能追溯到题号或数据。
+5. 描述“分化”“两极”或“集中失分”时必须列出频数依据。分数覆盖高、中、低多个连续档位时，应写成连续梯度或分散分布，不能称为两极分化。
+6. 给出下一节讲评课、后续作业和复测的具体安排，并让每一项建议能追溯到题号或数据。
 
 ## 输出
 
@@ -146,28 +147,33 @@ description: 当教师要依据物理学习数据为不同学生或学生小组�
 ];
 
 export function resolvePhysicsTeacherSkill(prompt: string): PhysicsTeacherSkill | undefined {
+  return resolvePhysicsTeacherSkills(prompt)[0];
+}
+
+export function resolvePhysicsTeacherSkills(prompt: string): PhysicsTeacherSkill[] {
   const normalized = prompt.trim();
-  if (!normalized) return undefined;
+  if (!normalized) return [];
+  const matched: PhysicsTeacherSkill[] = [];
+  if (/(逐题得分|答题明细|得分率|考试分析|学情诊断|错因判断|讲评课)/.test(normalized)) {
+    matched.push(skillByName("physics-exam-analysis"));
+  }
   if (
     /(出.{0,12}(题|试卷)|命题|组卷|模拟题|改编题|同构题|复测卷|生成.{0,8}(试题|题目|练习)|设计.{0,8}(试题|题目|练习)|题库.{0,12}(找|选|筛选|检索).{0,30}(原题|题目|试题))/.test(
       normalized
     )
   ) {
-    return skillByName("physics-question-design");
-  }
-  if (/(逐题得分|答题明细|得分率|考试分析|学情诊断|错因判断|讲评课)/.test(normalized)) {
-    return skillByName("physics-exam-analysis");
+    matched.push(skillByName("physics-question-design"));
   }
   if (/(备课|教案|课时方案|实验课|复习课|课堂活动)/.test(normalized)) {
-    return skillByName("physics-lesson-planning");
+    matched.push(skillByName("physics-lesson-planning"));
   }
   if (/(作业|错题|分层练习|作业辅导|答案反馈|逐级提示)/.test(normalized)) {
-    return skillByName("physics-homework-guidance");
+    matched.push(skillByName("physics-homework-guidance"));
   }
   if (/(个性化|学习路径|补弱|阶段目标|学习陪伴|学生分组)/.test(normalized)) {
-    return skillByName("physics-personalized-learning");
+    matched.push(skillByName("physics-personalized-learning"));
   }
-  return undefined;
+  return matched;
 }
 
 export function physicsTeacherSkillInstructions(skill: PhysicsTeacherSkill): string {

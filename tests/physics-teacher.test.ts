@@ -24,7 +24,8 @@ import { startPhysicsTeacherHttpServer } from "../src/physics-teacher/server.js"
 import { PhysicsTeacherService } from "../src/physics-teacher/service.js";
 import {
   physicsTeacherSkillInstructions,
-  resolvePhysicsTeacherSkill
+  resolvePhysicsTeacherSkill,
+  resolvePhysicsTeacherSkills
 } from "../src/physics-teacher/skills.js";
 import {
   createPhysicsTeacherRuntime,
@@ -179,6 +180,45 @@ describe("Magi 教师助手 backend", () => {
     const match = resolvePhysicsTeacherSkill("请参考题库生成一套物理模拟题");
     expect(match?.name).toBe("physics-question-design");
     expect(physicsTeacherSkillInstructions(match!)).not.toContain("description:");
+  });
+
+  it("loads exam analysis and original-question selection together for a combined task", async () => {
+    const promptRunner: typeof runHeadlessPrompt = async (input) => ({
+      sessionId: input.sessionId!,
+      jobId: "combined-business-skill-test",
+      status: "completed",
+      message: "已完成分析并从题库筛选原题"
+    });
+    const { service } = setup({}, undefined, promptRunner);
+    const project = service.createProject({
+      name: "九年级期中分析",
+      grade: "九年级",
+      className: "2班"
+    });
+    const session = service.createSession({
+      projectId: project.id,
+      title: "分析后配题",
+      kind: "exam-analysis"
+    });
+    const prompt =
+      "请按逐题得分率完成考试分析，找出低于60%的知识点，再从题库检索相同知识点的原题作为训练。";
+
+    await service.sendMessage({ sessionId: session.sessionId, prompt });
+
+    const context = sessionStore!
+      .getSession(session.sessionId)!
+      .messages.find((message) => message.role === "system")!.content;
+    expect(context).toContain("Skill：physics-exam-analysis");
+    expect(context).toContain("EXAM_ANALYSIS_BUSINESS_MARKER");
+    expect(context).toContain("连续档位时");
+    expect(context).toContain("不能称为两极分化");
+    expect(context).toContain("Skill：physics-question-design");
+    expect(context).toContain("QUESTION_DESIGN_BUSINESS_MARKER");
+    expect(context).toContain("目标是可用原题占 100%");
+    expect(resolvePhysicsTeacherSkills(prompt).map((skill) => skill.name)).toEqual([
+      "physics-exam-analysis",
+      "physics-question-design"
+    ]);
   });
 
   it("isolates projects while sharing Magi memory across sessions in one project", () => {

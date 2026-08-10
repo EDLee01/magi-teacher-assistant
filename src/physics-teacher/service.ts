@@ -36,7 +36,7 @@ import { TeachingResourceGateway } from "./resources.js";
 import {
   physicsTeacherSkillInstructions,
   PhysicsTeacherSkill,
-  resolvePhysicsTeacherSkill
+  resolvePhysicsTeacherSkills
 } from "./skills.js";
 import {
   buildPhysicsTeacherRuntimeEnv,
@@ -199,12 +199,15 @@ export class PhysicsTeacherService {
     const prompt = requireText(input.prompt, "prompt");
     const turnStartMessageId = session.messages.at(-1)?.id ?? 0;
     const followUp = resolveFollowUp(session, input.followUpToMessageId);
-    const businessSkill =
-      resolvePhysicsTeacherSkill(prompt) ??
-      (followUp?.previousUserMessage
-        ? resolvePhysicsTeacherSkill(followUp.previousUserMessage.content)
-        : undefined);
-    const isQuestionDesign = businessSkill?.name === "physics-question-design";
+    const businessSkills = mergePhysicsTeacherSkills(
+      resolvePhysicsTeacherSkills(prompt),
+      followUp?.previousUserMessage
+        ? resolvePhysicsTeacherSkills(followUp.previousUserMessage.content)
+        : []
+    );
+    const isQuestionDesign = businessSkills.some(
+      (skill) => skill.name === "physics-question-design"
+    );
     const resourceQuery = buildFollowUpResourceQuery(input.resourceQuery, followUp);
     const jobId = input.jobId?.trim() || randomUUID();
     const permissionScope = normalizePermissionScope(input.permissionScope);
@@ -235,7 +238,7 @@ export class PhysicsTeacherService {
           resourceContext,
           preparedAttachments.items,
           permissionScope,
-          businessSkill,
+          businessSkills,
           followUp
         ),
         metadata: {
@@ -502,7 +505,7 @@ function buildTeacherContext(
   resources?: TeachingResourceSearchResult,
   temporaryAttachments: PreparedPhysicsTeacherMessageAttachment[] = [],
   permissionScope: PhysicsTeacherPermissionScope = "project-write",
-  businessSkill?: PhysicsTeacherSkill,
+  businessSkills: PhysicsTeacherSkill[] = [],
   followUp?: PhysicsTeacherFollowUp
 ): string {
   const resourceLines = resources?.items.length
@@ -526,24 +529,26 @@ function buildTeacherContext(
         ])
       ]
     : [];
-  const businessSkillLines = businessSkill
+  const businessSkillLines = businessSkills.length
     ? [
         "",
         "[本次已隐式采用的业务 Skill]",
-        `Skill：${businessSkill.name}`,
-        "以下工作法已直接加载，不要再次调用 Skill 工具加载同一工作法。",
-        physicsTeacherSkillInstructions(businessSkill)
+        "以下工作法已直接加载，不要再次调用 Skill 工具加载相同工作法。",
+        ...businessSkills.flatMap((skill) => [
+          "",
+          `Skill：${skill.name}`,
+          physicsTeacherSkillInstructions(skill)
+        ])
       ]
     : [];
-  const questionBankLines =
-    businessSkill?.name === "physics-question-design"
-      ? [
-          "",
-          "[本次选题要求]",
-          "优先从项目题库逐个知识点检索并直接选用原题。只要存在合适原题，就不能用 AI 自编题替代。",
-          "每道选中题必须核对来源、原题号、题干、选项、答案以及所依赖的原图；题库缺口才允许补充新题并明确标注。"
-        ]
-      : [];
+  const questionBankLines = businessSkills.some((skill) => skill.name === "physics-question-design")
+    ? [
+        "",
+        "[本次选题要求]",
+        "优先从项目题库逐个知识点检索并直接选用原题。只要存在合适原题，就不能用 AI 自编题替代。",
+        "每道选中题必须核对来源、原题号、题干、选项、答案以及所依赖的原图；题库缺口才允许补充新题并明确标注。"
+      ]
+    : [];
   const followUpLines = followUp
     ? [
         "",
@@ -587,6 +592,15 @@ interface PhysicsTeacherFollowUp {
   target: MessageRecord;
   previousUserMessage?: MessageRecord;
   explicitlyTargeted: boolean;
+}
+
+function mergePhysicsTeacherSkills(
+  current: PhysicsTeacherSkill[],
+  previous: PhysicsTeacherSkill[]
+): PhysicsTeacherSkill[] {
+  const merged = new Map<string, PhysicsTeacherSkill>();
+  for (const skill of [...current, ...previous]) merged.set(skill.name, skill);
+  return [...merged.values()];
 }
 
 function resolveFollowUp(
