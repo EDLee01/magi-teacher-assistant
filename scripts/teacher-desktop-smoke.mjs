@@ -30,6 +30,10 @@ const markdownResponse = [
   "",
   "<img src=x onerror=alert(1)>"
 ].join("\n");
+const rejectedApprovalPrompt = "用于测试拒绝记忆草稿审批";
+const approvedApprovalPrompt = "用于测试允许记忆草稿审批";
+const rejectedDraftContent = "审批测试：这条被拒绝的候选记忆不应保存。";
+const approvedDraftContent = "审批测试：连续三次课堂观察显示学生会先画受力图。";
 const providerServer = http.createServer(async (request, response) => {
   const chunks = [];
   for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -53,13 +57,9 @@ const providerServer = http.createServer(async (request, response) => {
   if (JSON.stringify(body).includes("用于测试排队追问的当前任务")) {
     await new Promise((resolve) => setTimeout(resolve, 700));
   }
+  const approvalResponse = approvalProviderResponse(body);
   response.writeHead(200, { "content-type": "application/json" });
-  response.end(
-    JSON.stringify({
-      choices: [{ message: { role: "assistant", content: markdownResponse } }],
-      usage: { prompt_tokens: 12, completion_tokens: 4 }
-    })
-  );
+  response.end(JSON.stringify(approvalResponse ?? messageResponse(markdownResponse)));
 });
 await new Promise((resolve, reject) => {
   providerServer.once("error", reject);
@@ -87,7 +87,10 @@ try {
   assert.equal(folderSelection.skippedUnsupported, 1);
 
   electronApp = await electron.launch({
-    args: [path.join(repositoryRoot, "desktop/main.mjs")],
+    args: [
+      path.join(repositoryRoot, "desktop/main.mjs"),
+      `--user-data-dir=${path.join(temporaryRoot, "electron-user-data")}`
+    ],
     cwd: repositoryRoot,
     env: {
       ...process.env,
@@ -270,8 +273,87 @@ try {
   assert.match((await refreshedDraftCard.textContent()) || "", /更新已有记忆：旧的桌面端联调结论/);
   await refreshedDraftCard.locator(".reject").click();
   await page.locator("#memory-draft-list").filter({ hasText: "当前没有待确认的记忆" }).waitFor();
+
+  await page.locator("#permission-scope-button").click();
+  await page.locator('[data-permission-scope="approval"]').click();
+  assert.equal(await page.locator("#permission-scope-label").textContent(), "操作前询问");
+
+  await electronApp.evaluate(({ dialog }) => {
+    globalThis.__magiApprovalDialogs = [];
+    dialog.showMessageBox = async (_window, options) => {
+      globalThis.__magiApprovalDialogs.push(options);
+      return { response: 1, checkboxChecked: false };
+    };
+  });
+  const requestsBeforeRejection = providerRequests.length;
+  await page
+    .locator("#composer-input")
+    .fill(`${rejectedApprovalPrompt}：请创建一条待教师确认的项目记忆草稿。`);
+  await page.locator("#send-button").click();
+  await page
+    .locator(".message.assistant")
+    .filter({ hasText: "教师已拒绝创建记忆草稿" })
+    .waitFor();
+  assert.equal(providerRequests.length, requestsBeforeRejection + 3);
+  const rejectedDrafts = await getProjectMemoryState(page);
+  assert.equal(
+    rejectedDrafts.drafts.some((draft) => draft.content === rejectedDraftContent),
+    false
+  );
+  const rejectionDialogs = await electronApp.evaluate(() => globalThis.__magiApprovalDialogs);
+  assert.equal(rejectionDialogs.length, 1);
+  assert.deepEqual(rejectionDialogs[0].buttons, ["允许创建草稿", "拒绝"]);
+  assert.match(rejectionDialogs[0].message, /待确认记忆草稿/);
+  assert.match(rejectionDialogs[0].detail, /不会直接写入长期项目记忆/);
+  assert.match(rejectionDialogs[0].detail, new RegExp(rejectedDraftContent));
+
+  await electronApp.evaluate(({ dialog }) => {
+    globalThis.__magiApprovalDialogs = [];
+    dialog.showMessageBox = async (_window, options) => {
+      globalThis.__magiApprovalDialogs.push(options);
+      return { response: 0, checkboxChecked: false };
+    };
+  });
+  const requestsBeforeApproval = providerRequests.length;
+  await page
+    .locator("#composer-input")
+    .fill(`${approvedApprovalPrompt}：请创建一条待教师确认的项目记忆草稿。`);
+  await page.locator("#send-button").click();
+  await page
+    .locator(".message.assistant")
+    .filter({ hasText: "记忆草稿已等待教师确认" })
+    .waitFor();
+  assert.equal(providerRequests.length, requestsBeforeApproval + 3);
+  const approvedStateBeforeReview = await getProjectMemoryState(page);
+  assert.ok(
+    approvedStateBeforeReview.drafts.some(
+      (draft) => draft.status === "pending" && draft.content === approvedDraftContent
+    )
+  );
+  assert.equal(
+    approvedStateBeforeReview.files.some((file) => file.content.includes(approvedDraftContent)),
+    false,
+    "approving the tool operation must not confirm long-term memory"
+  );
+  const approvalDialogs = await electronApp.evaluate(() => globalThis.__magiApprovalDialogs);
+  assert.equal(approvalDialogs.length, 1);
+  const approvedDraftCard = page
+    .locator(".memory-card")
+    .filter({ hasText: approvedDraftContent });
+  await approvedDraftCard.waitFor();
+  await approvedDraftCard.locator(".approve").click();
+  await approvedDraftCard.waitFor({ state: "detached" });
+  const approvedStateAfterReview = await getProjectMemoryState(page);
+  assert.ok(
+    approvedStateAfterReview.files.some((file) => file.content.includes(approvedDraftContent)),
+    "teacher confirmation should write the approved draft to formal memory"
+  );
+
+  await page.locator("#permission-scope-button").click();
+  await page.locator('[data-permission-scope="project-write"]').click();
   await page.locator('.inspector-tab[data-tab="resources"]').click();
 
+  const requestsBeforeQueuedFollowUp = providerRequests.length;
   await page.locator("#composer-input").fill("用于测试排队追问的当前任务");
   await page.locator("#send-button").click();
   await page.waitForFunction(
@@ -288,9 +370,15 @@ try {
         message.textContent?.includes("这是排队的追问：完成后自动继续")
       )
   );
-  assert.equal(providerRequests.length, 4);
-  assert.match(JSON.stringify(providerRequests[3].body), /这是排队的追问/);
-  assert.match(JSON.stringify(providerRequests[3].body), /用于测试排队追问的当前任务/);
+  assert.equal(providerRequests.length, requestsBeforeQueuedFollowUp + 2);
+  assert.match(
+    JSON.stringify(providerRequests[requestsBeforeQueuedFollowUp + 1].body),
+    /这是排队的追问/
+  );
+  assert.match(
+    JSON.stringify(providerRequests[requestsBeforeQueuedFollowUp + 1].body),
+    /用于测试排队追问的当前任务/
+  );
 
   const temporaryMessageFile = path.join(temporaryRoot, "本次附件.csv");
   await writeFile(temporaryMessageFile, "student,score\n赵同学,88\n");
@@ -300,6 +388,7 @@ try {
         ? { canceled: false, filePaths: [filePath] }
         : { canceled: true, filePaths: [] };
   }, temporaryMessageFile);
+  const requestsBeforeMessageAttachment = providerRequests.length;
   await page.locator("#attach-message-button").click();
   await page.locator("#message-attachment-list").filter({ hasText: "本次附件.csv" }).waitFor();
   await page.locator("#composer-input").fill("分析这份临时成绩");
@@ -309,8 +398,9 @@ try {
   await page.waitForFunction(
     () => document.querySelector("#send-button")?.getAttribute("aria-label") === "发送"
   );
-  assert.equal(providerRequests.length, 5);
+  assert.equal(providerRequests.length, requestsBeforeMessageAttachment + 1);
 
+  const requestsBeforeInterrupt = providerRequests.length;
   await page.locator("#composer-input").fill("用于测试打断的长任务：请持续整理整套资料");
   await page.locator("#send-button").click();
   await page.waitForFunction(
@@ -326,8 +416,9 @@ try {
   assert.equal(await page.locator("#send-button").getAttribute("aria-label"), "发送");
   await page.locator("#send-button:not([disabled])").waitFor();
   assert.ok(Date.now() - stopStartedAt < 1_500, "cancelled request should settle promptly");
-  assert.equal(providerRequests.length, 6);
+  assert.equal(providerRequests.length, requestsBeforeInterrupt + 1);
 
+  const requestsBeforeDirectAttachment = providerRequests.length;
   const oneTurnAttachment = await page.evaluate(async () => {
     const projects = await window.physicsTeacherDesktop.request({
       method: "GET",
@@ -358,9 +449,15 @@ try {
   });
   assert.equal(oneTurnAttachment.response.result.message, markdownResponse);
   assert.equal(oneTurnAttachment.resources.length, 0);
-  assert.equal(providerRequests.length, 7);
-  assert.match(JSON.stringify(providerRequests[6].body), /本次对话临时资料/);
-  assert.match(JSON.stringify(providerRequests[6].body), /随堂测验\.csv/);
+  assert.equal(providerRequests.length, requestsBeforeDirectAttachment + 1);
+  assert.match(
+    JSON.stringify(providerRequests[requestsBeforeDirectAttachment].body),
+    /本次对话临时资料/
+  );
+  assert.match(
+    JSON.stringify(providerRequests[requestsBeforeDirectAttachment].body),
+    /随堂测验\.csv/
+  );
 
   const connectedData = await page.evaluate(async () => {
     const projects = await window.physicsTeacherDesktop.request({
@@ -413,7 +510,7 @@ try {
     await page.screenshot({ path: process.env.MAGI_TEACHER_DESKTOP_SCREENSHOT, fullPage: true });
   }
   process.stdout.write(
-    "Desktop smoke passed: queued follow-up, interrupt, cleared one-turn attachments, inspector close, generated-file previews, uploaded-resource previews, folder scanning, project Wiki, model settings, resources, and memory draft auto-refresh/review are connected.\n"
+    "Desktop smoke passed: queued follow-up, interrupt, cleared one-turn attachments, inspector close, generated-file previews, uploaded-resource previews, folder scanning, project Wiki, model settings, resources, memory draft auto-refresh/review, and the two-stage approval flow are connected.\n"
   );
 } catch (error) {
   if (page && !page.isClosed()) {
@@ -438,4 +535,114 @@ async function waitForSelectedProject(page, name) {
       document.querySelector("#project-select")?.selectedOptions[0]?.textContent === expectedName,
     name
   );
+}
+
+function approvalProviderResponse(body) {
+  const latestUserText = latestUserMessageText(body);
+  const scenario = latestUserText.includes(approvedApprovalPrompt)
+    ? {
+        prompt: approvedApprovalPrompt,
+        searchId: "approval-memory-search-approved",
+        draftId: "approval-memory-draft-approved",
+        content: approvedDraftContent,
+        finalText: "记忆草稿已等待教师确认。"
+      }
+    : latestUserText.includes(rejectedApprovalPrompt)
+      ? {
+          prompt: rejectedApprovalPrompt,
+          searchId: "approval-memory-search-rejected",
+          draftId: "approval-memory-draft-rejected",
+          content: rejectedDraftContent,
+          finalText: "教师已拒绝创建记忆草稿，项目记忆没有改变。"
+        }
+      : undefined;
+  if (!scenario) return undefined;
+  if (!hasToolResult(body, scenario.searchId)) {
+    return toolResponse([
+      toolCall(scenario.searchId, "ToolSearch", { query: "select:MemoryDraft" })
+    ]);
+  }
+  if (!hasToolResult(body, scenario.draftId)) {
+    return toolResponse([
+      toolCall(scenario.draftId, "MemoryDraft", {
+        category: "project",
+        content: scenario.content,
+        reason: `${scenario.prompt}的稳定课堂证据`,
+        confidence: 0.9
+      })
+    ]);
+  }
+  return messageResponse(scenario.finalText);
+}
+
+function latestUserMessageText(body) {
+  const message = [...(body.messages ?? [])].reverse().find((item) => item.role === "user");
+  if (!message) return "";
+  if (typeof message.content === "string") return message.content;
+  return (message.content ?? [])
+    .map((part) => (typeof part === "string" ? part : part?.text ?? ""))
+    .join("\n");
+}
+
+function hasToolResult(body, toolCallId) {
+  return (body.messages ?? []).some(
+    (message) => message.role === "tool" && message.tool_call_id === toolCallId
+  );
+}
+
+function messageResponse(content) {
+  return {
+    choices: [{ message: { role: "assistant", content }, finish_reason: "stop" }],
+    usage: { prompt_tokens: 12, completion_tokens: 4 }
+  };
+}
+
+function toolResponse(toolCalls) {
+  return {
+    choices: [
+      {
+        message: { role: "assistant", content: "", tool_calls: toolCalls },
+        finish_reason: "tool_calls"
+      }
+    ],
+    usage: { prompt_tokens: 12, completion_tokens: 4 }
+  };
+}
+
+function toolCall(id, name, input) {
+  return {
+    id,
+    type: "function",
+    function: { name, arguments: JSON.stringify(input) }
+  };
+}
+
+async function getProjectMemoryState(page) {
+  return page.evaluate(async () => {
+    const projects = await window.physicsTeacherDesktop.request({
+      method: "GET",
+      path: "/api/projects"
+    });
+    const projectId = projects.data.projects[0].id;
+    const [drafts, memory] = await Promise.all([
+      window.physicsTeacherDesktop.request({
+        method: "GET",
+        path: `/api/projects/${projectId}/memory/drafts`
+      }),
+      window.physicsTeacherDesktop.request({
+        method: "GET",
+        path: `/api/projects/${projectId}/memory`
+      })
+    ]);
+    const files = await Promise.all(
+      memory.data.files.map(async (file) => {
+        const result = await window.physicsTeacherDesktop.request({
+          method: "GET",
+          path: `/api/projects/${projectId}/memory?file=${encodeURIComponent(file.path)}`
+        });
+        return { ...file, content: result.data.content };
+      })
+    );
+    return { drafts: drafts.data.drafts, files };
+  });
 }

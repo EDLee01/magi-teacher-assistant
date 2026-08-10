@@ -404,15 +404,20 @@ function teachingMaterialFilters() {
 
 async function requestDesktopApproval(request) {
   if (!mainWindow || mainWindow.isDestroyed()) return false;
+  const isMemoryDraft = request.toolUse?.name === "MemoryDraft";
   const target =
     request.toolUse?.input?.file_path ??
     request.toolUse?.input?.command ??
     request.toolUse?.input?.url ??
+    (isMemoryDraft ? request.toolUse?.input?.content : undefined) ??
     "当前项目";
   const detail = [
     `操作：${approvalToolLabel(request.toolUse?.name)}`,
     `目标：${String(target).slice(0, 500)}`,
     request.reason ? `原因：${request.reason}` : undefined,
+    isMemoryDraft
+      ? "说明：允许后只会生成一条待确认草稿，不会直接写入长期项目记忆。"
+      : undefined,
     request.diff ? `\n变更预览：\n${request.diff.slice(0, 4_000)}` : undefined
   ]
     .filter(Boolean)
@@ -420,9 +425,11 @@ async function requestDesktopApproval(request) {
   const result = await dialog.showMessageBox(mainWindow, {
     type: "question",
     title: "Magi 请求操作权限",
-    message: "允许 Magi 执行这次操作吗？",
+    message: isMemoryDraft
+      ? "允许 Magi 创建这条待确认记忆草稿吗？"
+      : "允许 Magi 执行这次操作吗？",
     detail,
-    buttons: ["允许一次", "拒绝"],
+    buttons: [isMemoryDraft ? "允许创建草稿" : "允许一次", "拒绝"],
     defaultId: 1,
     cancelId: 1,
     noLink: true
@@ -438,7 +445,8 @@ function approvalToolLabel(name) {
       FilePatch: "修改文件",
       NotebookEdit: "编辑笔记本",
       Bash: "运行命令",
-      GitStage: "暂存 Git 变更"
+      GitStage: "暂存 Git 变更",
+      MemoryDraft: "创建待确认记忆草稿"
     }[name] ||
     name ||
     "项目操作"
