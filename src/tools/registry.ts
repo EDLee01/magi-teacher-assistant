@@ -1795,7 +1795,7 @@ const BUILTIN_TOOLS: RegisteredTool[] = [
   {
     name: "MemoryDraft",
     description:
-      "Create a pending project Memory draft for teacher review. This tool can only propose; it cannot approve, reject, or write formal Memory. Use it for stable evidence that should carry across Sessions, never for one-off errors, missing work, secrets, or fixed student labels.",
+      "Create a pending project Memory draft or revision for teacher review. This tool can only propose; it cannot approve, reject, or write formal Memory. When new evidence conflicts with a confirmed conclusion, set supersedes to that prior conclusion. Never use it for one-off errors, missing work, secrets, or fixed student labels.",
     category: "memory",
     tags: ["memory", "project", "draft", "review", "teacher", "session"],
     inputSchema: MemoryDraftToolInputSchema,

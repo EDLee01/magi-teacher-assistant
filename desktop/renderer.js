@@ -859,9 +859,12 @@ function renderMemory() {
   } else {
     for (const draft of pending) {
       const card = element("article", "memory-card");
+      const draftMeta = draft.supersedes
+        ? `更新已有记忆：${draft.supersedes} · ${draft.reason || "来自新教学证据"}`
+        : draft.reason || "来自教研对话";
       card.append(
         textElement("strong", draft.content || draft.targetFile),
-        textElement("div", draft.reason || "来自教研对话", "memory-meta")
+        textElement("div", draftMeta, "memory-meta")
       );
       const actions = element("div", "draft-actions");
       const approve = textElement("button", "确认写入", "approve");

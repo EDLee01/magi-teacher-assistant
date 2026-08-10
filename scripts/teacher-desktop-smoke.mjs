@@ -244,6 +244,7 @@ try {
       json: {
         category: "project",
         content: "这条草稿应在下一次回答后自动刷新出来。",
+        supersedes: "旧的桌面端联调结论。",
         reason: "验证对话后刷新记忆草稿"
       }
     });
@@ -266,6 +267,7 @@ try {
     .locator(".memory-card")
     .filter({ hasText: "这条草稿应在下一次回答后自动刷新出来" });
   await refreshedDraftCard.waitFor();
+  assert.match((await refreshedDraftCard.textContent()) || "", /更新已有记忆：旧的桌面端联调结论/);
   await refreshedDraftCard.locator(".reject").click();
   await page.locator("#memory-draft-list").filter({ hasText: "当前没有待确认的记忆" }).waitFor();
   await page.locator('.inspector-tab[data-tab="resources"]').click();

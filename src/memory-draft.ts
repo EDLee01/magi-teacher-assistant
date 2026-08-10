@@ -23,6 +23,7 @@ export interface MemoryDraft {
   targetFile: string;
   operation: MemoryDraftOperation;
   content: string;
+  supersedes?: string;
   reason: string;
   sourceSession?: string;
   confidence?: number;
@@ -41,13 +42,17 @@ export function proposeMemoryDraft(
   input: MemoryRootOptions & {
     targetFile: string;
     content: string;
+    supersedes?: string;
     reason: string;
     sourceSession?: string;
     confidence?: number;
     id?: string;
   }
 ): MemoryDraft {
-  if (!isMemoryContentSafe(input.content)) {
+  if (
+    !isMemoryContentSafe(input.content) ||
+    (input.supersedes !== undefined && !isMemoryContentSafe(input.supersedes))
+  ) {
     throw new Error(
       "Memory Draft rejected because it appears to contain a secret, token, password, or API key"
     );
@@ -61,6 +66,7 @@ export function proposeMemoryDraft(
     targetFile: input.targetFile,
     operation: "append",
     content: input.content.trim(),
+    supersedes: input.supersedes?.trim() || undefined,
     reason: input.reason.trim() || "Memory update proposed by agent",
     sourceSession: input.sourceSession,
     confidence: input.confidence,
@@ -75,7 +81,11 @@ export function proposeMemoryDraft(
     action: "memory.draft.proposed",
     target: draft.targetFile,
     sessionId: input.sourceSession,
-    metadata: { draftId: draft.id, reason: draft.reason }
+    metadata: {
+      draftId: draft.id,
+      reason: draft.reason,
+      supersedes: draft.supersedes
+    }
   });
   return draft;
 }
@@ -122,7 +132,7 @@ export function applyDraft(input: MemoryRootOptions & { id: string }): MemoryDra
     ...input,
     root,
     filePath: draft.targetFile,
-    content: draft.content
+    content: formatAppliedDraftContent(draft)
   });
   const applied = { ...draft, status: "applied" as const };
   atomicWrite(file, JSON.stringify(applied, null, 2) + "\n");
@@ -132,7 +142,7 @@ export function applyDraft(input: MemoryRootOptions & { id: string }): MemoryDra
     action: "memory.draft.applied",
     target: draft.targetFile,
     sessionId: draft.sourceSession,
-    metadata: { draftId: draft.id }
+    metadata: { draftId: draft.id, supersedes: draft.supersedes }
   });
   return applied;
 }
@@ -152,7 +162,7 @@ export function rejectDraft(input: MemoryRootOptions & { id: string }): MemoryDr
     action: "memory.draft.rejected",
     target: draft.targetFile,
     sessionId: draft.sourceSession,
-    metadata: { draftId: draft.id }
+    metadata: { draftId: draft.id, supersedes: draft.supersedes }
   });
   return rejected;
 }
@@ -164,6 +174,7 @@ export function formatDraftReview(input: MemoryRootOptions & { id: string }): st
     `Status: ${draft.status}`,
     `Operation: ${draft.operation}`,
     `Target: ${draft.targetFile}`,
+    draft.supersedes ? `Supersedes: ${draft.supersedes}` : undefined,
     `Reason: ${draft.reason}`,
     draft.sourceSession ? `Source session: ${draft.sourceSession}` : undefined,
     draft.confidence !== undefined ? `Confidence: ${draft.confidence}` : undefined,
@@ -180,6 +191,17 @@ export function formatDraftReview(input: MemoryRootOptions & { id: string }): st
     .join("\n");
 }
 
+function formatAppliedDraftContent(draft: MemoryDraft): string {
+  if (!draft.supersedes) return draft.content;
+  return [
+    "## 记忆修订",
+    "",
+    `- 被修订结论：${draft.supersedes}`,
+    `- 当前结论：${draft.content}`,
+    "- 生效说明：本修订经教师确认后，被修订结论不再作为当前教学判断；原记录仅为追溯保留。"
+  ].join("\n");
+}
+
 function draftFilePath(root: string, id: string): string {
   const safeId = id.replace(/[^a-zA-Z0-9_-]/g, "");
   if (!safeId) throw new Error("Memory Draft id must not be empty");
@@ -188,7 +210,12 @@ function draftFilePath(root: string, id: string): string {
 
 function readDraftFile(file: string): MemoryDraft {
   const parsed = JSON.parse(readFileSync(file, "utf8")) as MemoryDraft;
-  if (!parsed.id || !parsed.targetFile || parsed.operation !== "append") {
+  if (
+    !parsed.id ||
+    !parsed.targetFile ||
+    parsed.operation !== "append" ||
+    (parsed.supersedes !== undefined && typeof parsed.supersedes !== "string")
+  ) {
     throw new Error(`Invalid Memory Draft: ${file}`);
   }
   return parsed;

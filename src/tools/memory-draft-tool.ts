@@ -5,6 +5,7 @@ export type MemoryDraftCategory = "project" | "preference" | "decision" | "sessi
 export interface MemoryDraftToolRequest {
   category: MemoryDraftCategory;
   content: string;
+  supersedes?: string;
   reason: string;
   confidence?: number;
 }
@@ -26,6 +27,13 @@ export const MemoryDraftToolInputSchema = {
       description:
         "A concise memory candidate that separates observed evidence from interpretation and contains no secrets or unnecessary personal data."
     },
+    supersedes: {
+      type: "string",
+      minLength: 1,
+      maxLength: 1000,
+      description:
+        "For a revision, quote the prior confirmed conclusion that this candidate should replace as the current teaching judgment. Omit for a new memory."
+    },
     reason: {
       type: "string",
       minLength: 1,
@@ -43,13 +51,14 @@ export const MemoryDraftToolInputSchema = {
 } satisfies Record<string, unknown>;
 
 export function parseMemoryDraftToolInput(input: Record<string, unknown>): MemoryDraftToolRequest {
-  const allowed = new Set(["category", "content", "reason", "confidence"]);
+  const allowed = new Set(["category", "content", "supersedes", "reason", "confidence"]);
   for (const key of Object.keys(input)) {
     if (!allowed.has(key)) throw new Error(`MemoryDraft input does not allow ${key}`);
   }
   return {
     category: readCategory(input.category),
     content: readRequiredText(input.content, "content", 4000),
+    supersedes: readOptionalText(input.supersedes, "supersedes", 1000),
     reason: readRequiredText(input.reason, "reason", 500),
     confidence: readConfidence(input.confidence)
   };
@@ -66,12 +75,13 @@ export function executeMemoryDraftTool(input: {
     root: input.memoryRoot,
     targetFile: targetFile(input.request.category, input.sourceSession),
     content: input.request.content,
+    supersedes: input.request.supersedes,
     reason: input.request.reason,
     sourceSession: input.sourceSession,
     confidence: input.request.confidence
   });
   return [
-    `Created Memory Draft: ${draft.id} -> ${draft.targetFile}.`,
+    `Created ${draft.supersedes ? "Memory Revision Draft" : "Memory Draft"}: ${draft.id} -> ${draft.targetFile}.`,
     "Formal project memory is unchanged. The teacher must confirm or reject this draft in the project memory panel."
   ].join(" ");
 }
@@ -104,6 +114,11 @@ function readRequiredText(value: unknown, label: string, maxLength: number): str
   const text = value.trim();
   if (text.length > maxLength) throw new Error(`MemoryDraft ${label} is too long`);
   return text;
+}
+
+function readOptionalText(value: unknown, label: string, maxLength: number): string | undefined {
+  if (value === undefined) return undefined;
+  return readRequiredText(value, label, maxLength);
 }
 
 function readConfidence(value: unknown): number | undefined {

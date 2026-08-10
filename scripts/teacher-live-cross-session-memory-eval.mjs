@@ -46,6 +46,21 @@ const isolatedProjectPrompt = [
   "只根据这个项目已经确认的正式长期记忆回答：S01 下一阶段最需要关注什么？",
   "如果本项目没有相关正式记忆，就直接说明没有，不能调用其他项目或旧 Session。"
 ].join("\n");
+const revisionEvidence = [
+  "S01完成‘三步受力链’三周训练后进行了三次独立复测。",
+  "第1次、第2次、第3次均能完整写出研究对象、各力方向和匀速状态下的平衡关系，三次均独立完成。",
+  "教师核对后确认：原近期目标已经达成，S01不再需要摩擦力专项补弱，回归常规课堂巩固。"
+].join("\n");
+const revisionPrompt = [
+  "项目正式记忆仍记录 S01 需要‘三步受力链’专项训练，但新上传的三次复测证据与它发生冲突。",
+  "请创建一条 project 类别的记忆修订草稿：必须在 supersedes 写明被修订的旧结论，在 content 写新证据支持的当前结论。",
+  "不要直接改正式记忆；创建后说明教师确认前后分别以哪条结论为准。"
+].join("\n");
+const revisedRecallPrompt = [
+  "这是教师确认记忆修订后的全新 Session。只根据正式项目记忆回答：",
+  "S01 当前还需要把‘三步受力链’作为专项补弱目标吗？现在应进入什么教学安排？",
+  "请说明新结论的复测证据，并区分当前结论与仅供追溯的旧记录。"
+].join("\n");
 
 async function runLiveCrossSessionMemoryEval() {
   let runtime;
@@ -143,11 +158,8 @@ async function runLiveCrossSessionMemoryEval() {
       permissionScope: "project-write"
     });
     partial.unstableMessage = unstableResult.message;
-    assert.equal(
-      service.listMemoryDrafts(project.id).length,
-      countBeforeUnstable,
-      "单次错误仍创建了新的长期记忆草稿"
-    );
+    const countAfterUnstable = service.listMemoryDrafts(project.id).length;
+    assert.equal(countAfterUnstable, countBeforeUnstable, "单次错误仍创建了新的长期记忆草稿");
     assert.match(
       unstableResult.message,
       /证据不足|单次|一次|不创建|不写入|不能形成|不应形成/,
@@ -183,6 +195,82 @@ async function runLiveCrossSessionMemoryEval() {
     assert.doesNotMatch(recallResult.message, /紫色标记法/, "已拒绝草稿污染了新Session");
     assert.doesNotMatch(recallResult.message, /物理基础薄弱/, "单次错误标签污染了新Session");
 
+    stage("真实模型根据冲突新证据创建记忆修订草稿");
+    service.uploadResource({
+      projectId: project.id,
+      filename: "S01连续复测更新证据.txt",
+      body: Buffer.from(revisionEvidence, "utf8"),
+      mimeType: "text/plain",
+      kind: "student-learning"
+    });
+    const revisionSession = service.createSession({
+      projectId: project.id,
+      title: "学情冲突与记忆修订",
+      kind: "practice-adjustment"
+    });
+    const formalBeforeRevision = service.readMemory(project.id, "projects/context.md");
+    const revisionResult = await sendWithTimeout(service, {
+      sessionId: revisionSession.sessionId,
+      prompt: revisionPrompt,
+      resourceQuery: "S01 三次独立复测 目标达成 回归常规巩固",
+      modelAlias: PHYSICS_TEACHER_MODEL_ALIAS,
+      permissionScope: "project-write"
+    });
+    partial.revisionMessage = revisionResult.message;
+    const revisionDrafts = service
+      .listMemoryDrafts(project.id)
+      .filter((draft) => draft.status === "pending");
+    assert.equal(
+      revisionDrafts.length,
+      1,
+      `冲突新证据应产生1条修订草稿，实际${revisionDrafts.length}条`
+    );
+    const revisionDraft = revisionDrafts[0];
+    assert.match(revisionDraft.supersedes ?? "", /S01|三步受力链|摩擦力/, "修订草稿没有指明旧结论");
+    assert.match(
+      revisionDraft.content,
+      /三次|连续[\s\S]{0,200}(?:复测|完整)|目标.{0,10}达成|常规.{0,10}巩固/,
+      "修订草稿没有写清新证据支持的当前结论"
+    );
+    assert.doesNotMatch(formalBeforeRevision, /原近期目标已经达成/, "确认修订前正式记忆已改变");
+    assert.match(revisionResult.message, /修订|待确认|确认前/, "聊天没有说明修订草稿的确认边界");
+
+    stage("模拟教师确认记忆修订，并在新Session核对当前结论");
+    service.applyMemoryDraft(project.id, revisionDraft.id);
+    const formalAfterRevision = service.readMemory(project.id, "projects/context.md");
+    assert.match(formalAfterRevision, /## 记忆修订/, "正式记忆缺少修订标记");
+    assert.match(formalAfterRevision, /被修订结论/, "正式记忆缺少被修订结论");
+    assert.match(formalAfterRevision, /当前结论/, "正式记忆缺少当前结论");
+    assert.match(formalAfterRevision, /不再作为当前教学判断/, "旧结论没有降为追溯记录");
+    const revisedRecallSession = service.createSession({
+      projectId: project.id,
+      title: "修订后新Session",
+      kind: "lesson-planning"
+    });
+    const revisedRecallResult = await sendWithTimeout(service, {
+      sessionId: revisedRecallSession.sessionId,
+      prompt: revisedRecallPrompt,
+      modelAlias: PHYSICS_TEACHER_MODEL_ALIAS,
+      permissionScope: "read-only"
+    });
+    partial.revisedRecallMessage = revisedRecallResult.message;
+    assert.match(
+      revisedRecallResult.message,
+      /已达成|不再需要|无需继续|回归常规|常规.{0,10}巩固/,
+      "修订后新Session仍没有采用当前结论"
+    );
+    assert.match(revisedRecallResult.message, /三次|连续.{0,20}复测/, "修订后召回丢失新证据");
+    assert.match(
+      revisedRecallResult.message,
+      /追溯|旧记录|被修订|历史/,
+      "没有区分旧记录与当前结论"
+    );
+    assert.doesNotMatch(
+      revisedRecallResult.message,
+      /当前[^\n]{0,40}(?:持续薄弱|仍薄弱)|仍需[^\n]{0,30}三步受力链|继续[^\n]{0,30}三步受力链/,
+      "修订后仍把旧结论当作当前教学目标"
+    );
+
     stage("验证项目之间不共享学生学情记忆");
     const otherProject = service.createProject({
       name: "项目隔离业务测试",
@@ -212,6 +300,8 @@ async function runLiveCrossSessionMemoryEval() {
       stableMessage: stableResult.message,
       unstableMessage: unstableResult.message,
       recallMessage: recallResult.message,
+      revisionMessage: revisionResult.message,
+      revisedRecallMessage: revisedRecallResult.message,
       isolatedMessage: isolatedResult.message,
       stableDraft: {
         status: stableDraft.status,
@@ -221,10 +311,14 @@ async function runLiveCrossSessionMemoryEval() {
       },
       formalBeforeApply,
       formalAfterApply,
+      revisionDraft: {
+        content: revisionDraft.content,
+        supersedes: revisionDraft.supersedes
+      },
+      formalBeforeRevision,
+      formalAfterRevision,
       draftCountBeforeUnstable: countBeforeUnstable,
-      draftCountAfterUnstable: service
-        .listMemoryDrafts(project.id)
-        .filter((draft) => draft.id !== rejected.id).length
+      draftCountAfterUnstable: countAfterUnstable
     });
     const report = {
       status: "passed",
@@ -236,12 +330,18 @@ async function runLiveCrossSessionMemoryEval() {
       stableMessage: stableResult.message,
       unstableMessage: unstableResult.message,
       recallMessage: recallResult.message,
+      revisionMessage: revisionResult.message,
+      revisedRecallMessage: revisedRecallResult.message,
       isolatedMessage: isolatedResult.message,
       stableDraft: {
         status: stableDraft.status,
         targetFile: stableDraft.targetFile,
         content: stableDraft.content,
         sourceSessionMatches: stableDraft.sourceSession === evidenceSession.sessionId
+      },
+      revisionDraft: {
+        content: revisionDraft.content,
+        supersedes: revisionDraft.supersedes
       },
       assertions
     };
@@ -270,10 +370,15 @@ export function evaluateCrossSessionMemoryResult({
   stableMessage,
   unstableMessage,
   recallMessage,
+  revisionMessage,
+  revisedRecallMessage,
   isolatedMessage,
   stableDraft,
   formalBeforeApply,
   formalAfterApply,
+  revisionDraft,
+  formalBeforeRevision,
+  formalAfterRevision,
   draftCountBeforeUnstable,
   draftCountAfterUnstable
 }) {
@@ -292,6 +397,20 @@ export function evaluateCrossSessionMemoryResult({
   assert.match(recallMessage, /三步受力链/);
   assert.match(recallMessage, /连续|三次/);
   assert.doesNotMatch(recallMessage, /紫色标记法|物理基础薄弱/);
+  assert.match(revisionDraft.supersedes ?? "", /S01|三步受力链|摩擦力/);
+  assert.match(revisionDraft.content, /三次|目标.{0,10}达成|常规.{0,10}巩固/);
+  assert.doesNotMatch(formalBeforeRevision, /原近期目标已经达成/);
+  assert.match(formalAfterRevision, /## 记忆修订/);
+  assert.match(formalAfterRevision, /被修订结论/);
+  assert.match(formalAfterRevision, /当前结论/);
+  assert.match(formalAfterRevision, /不再作为当前教学判断/);
+  assert.match(revisionMessage, /修订|待确认|确认前/);
+  assert.match(revisedRecallMessage, /已达成|不再需要|无需继续|回归常规|常规.{0,10}巩固/);
+  assert.match(revisedRecallMessage, /追溯|旧记录|被修订|历史/);
+  assert.doesNotMatch(
+    revisedRecallMessage,
+    /当前[^\n]{0,40}(?:持续薄弱|仍薄弱)|仍需[^\n]{0,30}三步受力链|继续[^\n]{0,30}三步受力链/
+  );
   assert.doesNotMatch(isolatedMessage, /三步受力链/);
   return [
     "稳定学情只创建待确认项目记忆草稿",
@@ -299,6 +418,8 @@ export function evaluateCrossSessionMemoryResult({
     "教师确认后新Session召回教学重点与证据边界",
     "单次错误没有升级为固定能力标签或长期记忆",
     "已拒绝草稿不会污染新Session",
+    "冲突新证据生成带supersedes关系的待确认修订草稿",
+    "教师确认修订后旧结论仅供追溯且新Session采用当前结论",
     "不同项目之间不共享学生学情记忆"
   ];
 }

@@ -909,6 +909,7 @@ describe("Magi 教师助手 backend", () => {
     expect(teacherContext).toContain("[项目记忆与教师确认]");
     expect(teacherContext).toContain("select:MemoryDraft");
     expect(teacherContext).toContain("一次作答错误、一次缺交、一次缺测");
+    expect(teacherContext).toContain("supersedes 字段");
 
     service.setApprovalResolver(async () => true);
     await service.sendMessage({
@@ -1056,6 +1057,44 @@ describe("Magi 教师助手 backend", () => {
     expect(service.readMemory(project.id, "projects/context.md")).not.toContain("S01连续三次");
     service.applyMemoryDraft(project.id, pendingMemory!.id);
     expect(service.readMemory(project.id, "projects/context.md")).toContain("S01连续三次");
+
+    const proposedRevision = await executeRegisteredTool({
+      cwd: project.rootDir,
+      stateRoot: getMagiPaths(temp!.env).stateRoot,
+      memoryRoot: projectMemoryRoot,
+      sessionId: memorySession.sessionId,
+      permissionMode: "dontAsk",
+      rules,
+      toolUse: {
+        type: "tool-use",
+        id: "teacher-memory-revision-draft",
+        name: "MemoryDraft",
+        input: {
+          category: "project",
+          supersedes: "S01连续三次在摩擦力受力分析中漏写平衡关系。",
+          content: "S01后续三次复测过程完整，原近期目标已达成，回归常规巩固。",
+          reason: "连续三次复测与旧结论冲突",
+          confidence: 0.95
+        }
+      }
+    });
+    expect(proposedRevision.content).toContain("Created Memory Revision Draft");
+    const revisionDraft = service
+      .listMemoryDrafts(project.id)
+      .find((draft) => draft.content.includes("原近期目标已达成"));
+    expect(revisionDraft).toEqual(
+      expect.objectContaining({
+        status: "pending",
+        supersedes: "S01连续三次在摩擦力受力分析中漏写平衡关系。"
+      })
+    );
+    expect(service.readMemory(project.id, "projects/context.md")).not.toContain("原近期目标已达成");
+    service.applyMemoryDraft(project.id, revisionDraft!.id);
+    const revisedMemory = service.readMemory(project.id, "projects/context.md");
+    expect(revisedMemory).toContain("## 记忆修订");
+    expect(revisedMemory).toContain("被修订结论：S01连续三次");
+    expect(revisedMemory).toContain("当前结论：S01后续三次复测过程完整");
+    expect(revisedMemory).toContain("不再作为当前教学判断");
 
     const directPath = `${project.rootDir}/artifacts/知识图谱.md`;
     const directWrite = await executeRegisteredTool({

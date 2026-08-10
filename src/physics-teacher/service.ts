@@ -463,6 +463,7 @@ export class PhysicsTeacherService {
     projectId: string;
     category: PhysicsTeacherMemoryCategory;
     content: string;
+    supersedes?: string;
     reason: string;
     sourceSession?: string;
     confidence?: number;
@@ -476,6 +477,7 @@ export class PhysicsTeacherService {
       ...this.memoryOptions(projectPaths),
       targetFile: memoryTarget(input.category, input.sourceSession),
       content: requireText(input.content, "content"),
+      supersedes: input.supersedes?.trim() || undefined,
       reason: requireText(input.reason, "reason"),
       sourceSession: input.sourceSession,
       confidence: validateConfidence(input.confidence)
@@ -633,6 +635,7 @@ function buildTeacherContext(
       ? "当前为只读模式，不能创建记忆草稿；如教师要求记录，说明需要先切换到“项目内读写”或“操作前询问”。"
       : `当教师明确要求把稳定结论带到后续 Session，或业务 Skill 明确要求形成可审核候选时，先调用 ToolSearch 搜索 MemoryDraft，再用 select:MemoryDraft 加载完整工具，最后用 MemoryDraft 创建一条待确认草稿。${permissionScope === "approval" ? "本次创建草稿前还必须获得教师审批。" : ""}MemoryDraft 只能提议，不能批准或直接写入正式记忆。`,
     "一次作答错误、一次缺交、一次缺测或缺少来源的判断不得创建长期记忆草稿；必须说明证据不足。草稿只保留必要的匿名教学证据，不写姓名、联系方式、密钥或固定能力标签。",
+    "新证据与正式记忆冲突时，不得静默覆盖或把新旧结论同时当作当前事实。创建 MemoryDraft 时必须在 supersedes 字段写明被修订的旧结论，在 content 写新证据支持的当前结论；教师确认前旧结论仍是正式记录，确认后旧结论只供追溯。",
     "创建草稿后告诉教师去项目资料面板确认或拒绝；未经教师确认，不得声称已记住或会在后续 Session 使用。"
   ];
   return [

@@ -250,6 +250,7 @@ async function handleRequest(
       projectId: draftsMatch[0],
       category: readMemoryCategory(body.category),
       content: readString(body, "content"),
+      supersedes: readOptionalString(body, "supersedes"),
       reason: readString(body, "reason"),
       sourceSession: readOptionalString(body, "sourceSession"),
       confidence: readOptionalNumber(body, "confidence")
